@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0A0B0E;
+  --surface: #14161B;
+  --surface-hover: #1A1D24;
+  --line: #22262E;
+  --line-bright: #2E3440;
+  --accent: #00FF9C;
+  --accent-dim: rgba(0, 255, 156, 0.15);
+  --text-main: #E4E7EB;
+  --text-dim: #717681;
+  --orange: #F27D26;
+  --cyan: #88C0D0;
+  --f-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', Courier, monospace;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-main);
+  font-family: var(--f-mono);
+}
+
+/* Custom Technical Dashboard Components */
+.tech-card {
+  background-color: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
+.tech-card-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+  font-family: var(--f-mono);
+  font-weight: 700;
+}
+
+.tech-tag {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: #1C1F26;
+  border: 1px solid var(--line);
+  font-family: var(--f-mono);
+  text-transform: uppercase;
+}
+
+.tech-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--accent);
+  animation: techBlink 1s step-end infinite;
+  vertical-align: middle;
+}
+
+@keyframes techBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0A0B0E;
+}
+::-webkit-scrollbar-thumb {
+  background: #22262E;
+  border-radius: 1px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}

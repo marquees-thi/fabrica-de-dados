@@ -1,0 +1,6 @@
+{
+  "name": "Fábrica de Dados B2B - Garimpeiro Big Data",
+  "description": "Central de Engenharia de Web Scraping, scripts Playwright com rolagem por contêiner, garimpo OSM/CNPJ e enriquecimento com Gemini Pro.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
