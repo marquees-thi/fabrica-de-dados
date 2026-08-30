@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { Header } from "./components/Header";
 import { TabsNav, TabKey } from "./components/TabsNav";
-import { DashboardOverview } from "./components/DashboardOverview";
-import { LiveGarimpoTester } from "./components/LiveGarimpoTester";
+import { OneClickLaunchpad } from "./components/OneClickLaunchpad";
 import { BackgroundJobsManager } from "./components/BackgroundJobsManager";
+import { SettingsEvasionPanel } from "./components/SettingsEvasionPanel";
+import { LiveGarimpoTester } from "./components/LiveGarimpoTester";
 import { GeminiEnricherTester } from "./components/GeminiEnricherTester";
 import { GeoGridGenerator } from "./components/GeoGridGenerator";
 import { ScriptViewer } from "./components/ScriptViewer";
@@ -11,7 +12,7 @@ import { SystemTechPanel } from "./components/SystemTechPanel";
 import { CompanyLead } from "./types";
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  const [activeTab, setActiveTab] = useState<TabKey>("launchpad");
   const [leadForGemini, setLeadForGemini] = useState<CompanyLead | null>(null);
 
   const handleSendToGemini = (company: CompanyLead) => {
@@ -30,21 +31,25 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-3 sm:px-4 lg:px-6 py-4">
-        {activeTab === "overview" && (
-          <DashboardOverview onNavigate={(tab) => setActiveTab(tab)} />
-        )}
-
-        {activeTab === "live_garimpo" && (
-          <LiveGarimpoTester 
-            onSendToGemini={handleSendToGemini} 
-            onNavigate={(tab) => setActiveTab(tab)} 
-          />
+        {activeTab === "launchpad" && (
+          <OneClickLaunchpad onNavigate={(tab) => setActiveTab(tab)} />
         )}
 
         {activeTab === "background_jobs" && (
           <BackgroundJobsManager 
             onSelectLeadForAI={handleSendToGemini}
             onNavigate={(tab) => setActiveTab(tab)}
+          />
+        )}
+
+        {activeTab === "settings" && (
+          <SettingsEvasionPanel />
+        )}
+
+        {activeTab === "live_garimpo" && (
+          <LiveGarimpoTester 
+            onSendToGemini={handleSendToGemini} 
+            onNavigate={(tab) => setActiveTab(tab)} 
           />
         )}
 
@@ -69,11 +74,13 @@ export default function App() {
           <div className="flex items-center gap-4 text-[#717681]">
             <span>PERSISTÊNCIA EM DISCO</span>
             <span>•</span>
-            <span>OSM OVERPASS ENGINE</span>
+            <span>STEALTH MODE & PROXIES</span>
             <span>•</span>
-            <span>GEMINI 3.7 FLASH</span>
+            <span>FILTRO ANTI-DUPLICIDADE</span>
             <span>•</span>
-            <span>EXPORTAÇÃO EXCEL / CSV</span>
+            <span>GEMINI PRO IA</span>
+            <span>•</span>
+            <span>WEBHOOK & EXCEL CSV</span>
           </div>
         </div>
       </footer>

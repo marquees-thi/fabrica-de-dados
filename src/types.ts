@@ -2,6 +2,8 @@ export interface CompanyLead {
   id: string;
   name: string;
   phone?: string;
+  email?: string;
+  emailStatus?: "found" | "not_found" | "protected_cloudflare" | "generic";
   website?: string;
   address?: string;
   suburb?: string;
@@ -14,10 +16,18 @@ export interface CompanyLead {
   lon?: number;
   mapsSearchUrl: string;
   mapsCoordUrl?: string;
+  aboutUsText?: string;
+  icebreaker?: string;
+  coldEmailSubject?: string;
+  coldEmailBody?: string;
+  isEnriched?: boolean;
+  isDuplicate?: boolean;
+  leadStatus?: "raw" | "scraped" | "enriched" | "exported" | "webhook_sent";
   highlight?: string;
   hasPhone?: boolean;
   hasWebsite?: boolean;
   hasAddress?: boolean;
+  scrapedAt?: string;
 }
 
 export interface IcebreakerResult {
@@ -34,19 +44,45 @@ export interface IcebreakerResult {
 export interface BackgroundJob {
   id: string;
   title: string;
-  type: "single_city" | "batch_multi" | "grid_gps";
+  type: "single_city" | "batch_multi" | "grid_gps" | "one_click_launch";
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   cities: string[];
   niches: string[];
+  limitPerCity?: number;
   progressPercent: number;
   currentStep: string;
   totalCombinations: number;
   completedCombinations: number;
   leadsCollected: number;
+  emailsFoundCount?: number;
+  enrichedCount?: number;
+  skippedDuplicatesCount?: number;
+  failedSitesCount?: number;
   leads: CompanyLead[];
   createdAt: string;
   finishedAt?: string;
   logs: string[];
+  settingsUsed?: {
+    stealthMode: boolean;
+    rotateProxies: boolean;
+    autoEnrichGemini: boolean;
+    autoScrapeWebsites: boolean;
+  };
+}
+
+export interface SystemSettings {
+  geminiApiKey: string;
+  geminiModel: string;
+  proxies: string;
+  rotateProxies: boolean;
+  stealthMode: boolean;
+  antiDuplication: boolean;
+  autoScrapeWebsites: boolean;
+  autoEnrichGemini: boolean;
+  sellerOffer: string;
+  webhookUrl: string;
+  webhookPlatform: "instantly" | "lemlist" | "n8n" | "make" | "generic";
+  totalKnownDuplicates: number;
 }
 
 export interface GridTile {
@@ -77,4 +113,3 @@ export interface PythonScript {
   category: "maps_fix" | "alternative_osm" | "grid_orchestrator" | "gemini_enricher" | "pipeline_sh";
   code: string;
 }
-

@@ -1,8 +1,9 @@
 import React from "react";
 import { 
-  Laptop, 
-  PlayCircle, 
+  Zap, 
   Layers, 
+  Sliders, 
+  PlayCircle, 
   Sparkles, 
   MapPin, 
   Code2, 
@@ -11,9 +12,10 @@ import {
 } from "lucide-react";
 
 export type TabKey = 
-  | "overview" 
-  | "live_garimpo" 
+  | "launchpad"
   | "background_jobs" 
+  | "settings"
+  | "live_garimpo" 
   | "gemini_test" 
   | "grid_generator" 
   | "scripts" 
@@ -27,86 +29,87 @@ interface TabsNavProps {
 export const TabsNav: React.FC<TabsNavProps> = ({ activeTab, onSelectTab }) => {
   const tabs: { key: TabKey; label: string; icon: React.ReactNode; badge?: string }[] = [
     {
-      key: "overview",
-      label: "Central & Manual",
-      icon: <Laptop className="w-3.5 h-3.5" />,
-      badge: "INÍCIO",
-    },
-    {
-      key: "live_garimpo",
-      label: "Garimpo de Leads",
-      icon: <PlayCircle className="w-3.5 h-3.5" />,
-      badge: "LIVE",
+      key: "launchpad",
+      label: "Lançamento Aperta-Botões",
+      icon: <Zap className="w-3.5 h-3.5 text-[#00FF9C]" />,
+      badge: "MÓDULO 1",
     },
     {
       key: "background_jobs",
-      label: "Fila 24/7 no Servidor",
+      label: "Fila 24/7 & Leads",
       icon: <Layers className="w-3.5 h-3.5" />,
-      badge: "AUTÔNOMO",
+      badge: "PRODUTO FINAL",
+    },
+    {
+      key: "settings",
+      label: "Evasão & Configurações",
+      icon: <Sliders className="w-3.5 h-3.5" />,
+      badge: "STEALTH / IA",
+    },
+    {
+      key: "live_garimpo",
+      label: "Garimpo Live",
+      icon: <PlayCircle className="w-3.5 h-3.5" />,
     },
     {
       key: "gemini_test",
       label: "IA Quebra-Gelo",
       icon: <Sparkles className="w-3.5 h-3.5" />,
-      badge: "GEMINI 3.7",
     },
     {
       key: "grid_generator",
       label: "Grid GPS (Big Data)",
       icon: <MapPin className="w-3.5 h-3.5" />,
-      badge: "MULTI-BAIRRO",
     },
     {
       key: "scripts",
-      label: "Scripts Python",
+      label: "Scripts Python/Playwright",
       icon: <Code2 className="w-3.5 h-3.5" />,
-      badge: "TERMINAL",
     },
     {
       key: "tech_diagnosis",
-      label: "Diagnóstico & Ubuntu",
-      icon: <Server className="w-3.5 h-3.5" />,
-      badge: "DAEMON",
-    },
+      label: "Diagnóstico Ubuntu",
+      icon: <Terminal className="w-3.5 h-3.5" />,
+    }
   ];
 
   return (
-    <div className="border-b border-[#22262E] bg-[#0A0B0E]/90 sticky top-[65px] z-40">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <nav className="flex space-x-1 sm:space-x-1.5 overflow-x-auto py-1.5 scrollbar-none font-mono">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.key;
-            return (
-              <button
-                key={tab.key}
-                id={`tab-btn-${tab.key}`}
-                onClick={() => onSelectTab(tab.key)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-[2px] text-xs font-mono uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+    <nav className="border-b border-[#22262E] bg-[#14161B]/95 backdrop-blur sticky top-[53px] z-40 overflow-x-auto no-scrollbar">
+      <div className="max-w-[1600px] mx-auto px-4 flex items-center gap-1.5 min-w-max py-1.5">
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => onSelectTab(tab.key)}
+              className={`
+                flex items-center gap-2 px-3 py-2 text-xs font-mono transition-all border
+                ${
                   isActive
-                    ? "bg-[#14161B] text-[#00FF9C] border-b-2 border-[#00FF9C] border-t border-x border-[#22262E] shadow-[0_2px_8px_rgba(0,255,156,0.1)]"
-                    : "text-[#717681] hover:text-[#E4E7EB] hover:bg-[#14161B]/60 border border-transparent"
-                }`}
-              >
-                <span className={isActive ? "text-[#00FF9C]" : "text-[#717681]"}>
-                  {tab.icon}
+                    ? "bg-[#1C1F26] text-[#00FF9C] border-[#00FF9C]/60 shadow-[0_0_12px_rgba(0,255,156,0.15)] font-bold"
+                    : "bg-[#0A0B0E]/60 text-[#A0A6B1] border-[#22262E] hover:text-[#E4E7EB] hover:border-[#383D47]"
+                }
+              `}
+            >
+              <span className={isActive ? "text-[#00FF9C]" : "text-[#717681]"}>
+                {tab.icon}
+              </span>
+              <span>{tab.label}</span>
+              {tab.badge && (
+                <span
+                  className={`text-[9px] px-1.5 py-0.2 font-mono uppercase tracking-wider ${
+                    isActive
+                      ? "bg-[#00FF9C]/20 text-[#00FF9C] border border-[#00FF9C]/30"
+                      : "bg-[#22262E] text-[#717681]"
+                  }`}
+                >
+                  {tab.badge}
                 </span>
-                <span>{tab.label}</span>
-                {tab.badge && (
-                  <span
-                    className={`text-[9px] font-mono px-1 py-0.2 rounded-[2px] ${
-                      isActive
-                        ? "bg-[#00FF9C]/10 text-[#00FF9C] border border-[#00FF9C]/40"
-                        : "bg-[#1C1F26] text-[#717681] border border-[#22262E]"
-                    }`}
-                  >
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
+              )}
+            </button>
+          );
+        })}
       </div>
-    </div>
+    </nav>
   );
 };
