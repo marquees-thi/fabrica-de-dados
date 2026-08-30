@@ -712,7 +712,7 @@ function sanitizeFileSlug(text: string) {
     .trim();
 }
 
-async function generateFormattedExcel(leads: any[], outputPath: string, sheetTitle: string = "Leads B2B") {
+async function generateFormattedExcel(leads: any[], outputPath: string, sheetTitle: string = "Leads B2B", theme: "dark" | "light" = "dark") {
   try {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = "Fábrica de Dados B2B";
@@ -746,14 +746,17 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
 
     worksheet.columns = columns;
 
-    // Header row style (Slate / Dark Blue #1E293B, White text, Bold, Height 28, Centered)
+    const headerColor = theme === "light" ? "FF0F766E" : "FF1E293B";
+    const zebraColor = theme === "light" ? "FFF1F5F9" : "FFF8FAFC";
+
+    // Header row style (Slate / Dark Blue #1E293B or Teal #0F766E, White text, Bold, Height 28, Centered)
     const headerRow = worksheet.getRow(1);
     headerRow.height = 28;
     headerRow.eachCell((cell) => {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FF1E293B" } // Slate #1E293B
+        fgColor: { argb: headerColor }
       };
       cell.font = {
         name: "Calibri",
@@ -800,11 +803,11 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
         address: lead.address || "",
         rating: Number(lead.rating) || "",
         reviewsCount: Number(lead.reviewsCount) || 0,
-        aboutUsText: (lead.aboutUsText || "").replace(/\r?\n/g, " "),
+        aboutUsText: (lead.aboutUsText || lead.aboutUs || "").replace(/\r?\n/g, " "),
         icebreaker: (lead.icebreaker || "").replace(/\r?\n/g, " "),
         coldEmailSubject: lead.coldEmailSubject || "",
         coldEmailBody: (lead.coldEmailBody || "").replace(/\r?\n/g, " "),
-        mapsSearchUrl: lead.mapsSearchUrl || ""
+        mapsSearchUrl: lead.mapsSearchUrl || lead.googleMapsUrl || ""
       });
 
       row.height = 20;
@@ -822,7 +825,7 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
           cell.fill = {
             type: "pattern",
             pattern: "solid",
-            fgColor: { argb: "FFF8FAFC" } // Zebra subtle gray #F8FAFC
+            fgColor: { argb: zebraColor }
           };
         }
 
@@ -1127,7 +1130,9 @@ async function executeJobInBackground(jobId: string) {
     "--gemini_key", currentSettings.geminiApiKey || process.env.GEMINI_API_KEY || "",
     "--gemini_model", currentSettings.geminiModel || "gemini-3.1-flash-lite",
     "--seller_offer", currentSettings.sellerOffer || "Soluções Comerciais e Prospecção B2B",
-    "--job_id", jobId
+    "--job_id", jobId,
+    "--enrich_gemini", job.settingsUsed?.autoEnrichGemini ? "true" : "false",
+    "--excel_theme", (currentSettings as any).excelTheme || "dark"
   ];
 
   let pythonSpawned = false;
@@ -1587,7 +1592,10 @@ async function startServer() {
       geminiApiKey,
       sellerOffer,
       autoScrapeWebsites = true,
-      autoEnrichGemini = true,
+      autoEnrichGemini,
+      enrich_gemini,
+      excel_theme,
+      excelTheme,
       stealthMode = true,
     } = req.body;
 
@@ -1618,6 +1626,16 @@ async function startServer() {
 
     const resolvedLimit = Number(targetLeadsCount) || Number(limit) || 50;
     const resolvedScope: "city_center" | "macro_metro" = scope === "macro_metro" ? "macro_metro" : "city_center";
+
+    // Enrichment flag: default to false if not specified, or respect toggle
+    const shouldEnrichGemini = enrich_gemini !== undefined 
+      ? Boolean(enrich_gemini) 
+      : autoEnrichGemini !== undefined 
+        ? Boolean(autoEnrichGemini) 
+        : false;
+
+    const chosenTheme = excel_theme || excelTheme || (currentSettings as any).excelTheme || "dark";
+    (currentSettings as any).excelTheme = chosenTheme;
 
     if (geminiApiKey && typeof geminiApiKey === "string" && geminiApiKey.length > 5) {
       currentSettings.geminiApiKey = geminiApiKey;
@@ -1653,12 +1671,12 @@ async function startServer() {
       createdAt: new Date().toISOString(),
       logs: [
         `[${new Date().toLocaleTimeString()}] Tarefa recebida pelo servidor Ubuntu.`,
-        `[${new Date().toLocaleTimeString()}] Parâmetros: ${resolvedCities.join(", ")} | Nicho: ${resolvedNiches.join(", ")} | Escopo: ${resolvedScope === "macro_metro" ? "Macro-Região Metropolitana" : "Município Central"} | Meta: ${resolvedLimit} leads.`
+        `[${new Date().toLocaleTimeString()}] Parâmetros: ${resolvedCities.join(", ")} | Nicho: ${resolvedNiches.join(", ")} | Escopo: ${resolvedScope === "macro_metro" ? "Macro-Região Metropolitana" : "Município Central"} | Meta: ${resolvedLimit} leads | Gemini IA: ${shouldEnrichGemini ? "LIGADO" : "DESLIGADO (Extração Rápida)"}.`
       ],
       settingsUsed: {
         stealthMode: stealthMode !== false && currentSettings.stealthMode,
         rotateProxies: currentSettings.rotateProxies,
-        autoEnrichGemini: autoEnrichGemini !== false && currentSettings.autoEnrichGemini,
+        autoEnrichGemini: shouldEnrichGemini,
         autoScrapeWebsites: autoScrapeWebsites !== false && currentSettings.autoScrapeWebsites,
       }
     };

@@ -55,10 +55,6 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
   const [sendingWebhook, setSendingWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState<string | null>(null);
 
-  // Smart Logs Terminal Auto-scroll (Disabled by default per user specification)
-  const [autoScroll, setAutoScroll] = useState(false);
-  const logsContainerRef = useRef<HTMLDivElement>(null);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const fetchJobs = async () => {
@@ -179,23 +175,6 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
     }, 4000);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (autoScroll && terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [selectedJob?.logs, autoScroll]);
-
-  const handleLogsScroll = () => {
-    if (!logsContainerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = logsContainerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 40;
-    if (!isAtBottom && autoScroll) {
-      setAutoScroll(false);
-    } else if (isAtBottom && !autoScroll) {
-      setAutoScroll(true);
-    }
-  };
 
   // Delete single lead
   const handleDeleteLead = async (leadId: string) => {
@@ -794,34 +773,17 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                     </div>
                   )}
 
-                  {/* Terminal Virtual Minimalista com Logs SSE e Smart Auto-Scroll */}
+                  {/* Terminal Virtual Minimalista com Logs SSE (Sem rolagem forçada) */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] font-mono text-[#717681]">
                       <span className="flex items-center gap-1.5">
                         <Terminal className="w-3.5 h-3.5 text-[#00FF9C]" />
                         <span>TERMINAL VIRTUAL // STREAMING EM TEMPO REAL (SSE)</span>
                       </span>
-                      <div className="flex items-center gap-3">
-                        <span>{selectedJob.logs.length} eventos</span>
-                        <button
-                          type="button"
-                          onClick={() => setAutoScroll(!autoScroll)}
-                          className={`text-[10px] px-2 py-0.5 border font-bold transition-all ${
-                            autoScroll
-                              ? "bg-[#00FF9C]/20 border-[#00FF9C] text-[#00FF9C]"
-                              : "bg-[#1C1F26] border-[#22262E] text-[#717681] hover:text-[#E4E7EB]"
-                          }`}
-                        >
-                          Auto-scroll: {autoScroll ? "LIGADO" : "PAUSADO"}
-                        </button>
-                      </div>
+                      <span className="text-[10px] text-[#A0A6B1]">{selectedJob.logs.length} eventos registrados</span>
                     </div>
 
-                    <div
-                      ref={logsContainerRef}
-                      onScroll={handleLogsScroll}
-                      className="bg-[#0A0B0E] border border-[#22262E] p-3 rounded-none font-mono text-xs text-[#A0A6B1] h-36 overflow-y-auto space-y-1"
-                    >
+                    <div className="bg-[#0A0B0E] border border-[#22262E] p-3 rounded-none font-mono text-xs text-[#A0A6B1] h-36 overflow-y-auto space-y-1">
                       {selectedJob.logs.map((log, idx) => {
                         const isSuccess = log.includes("✓") || log.includes("🎉") || log.includes("concluído");
                         const isWarning = log.includes("♻️") || log.includes("🛡️") || log.includes("PULADO") || log.includes("⚠️");
@@ -844,7 +806,6 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                           </div>
                         );
                       })}
-                      <div ref={terminalEndRef} />
                     </div>
                   </div>
                 </div>

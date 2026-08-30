@@ -234,20 +234,27 @@ def clean_domain(url):
 
 def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini_model="gemini-3.1-flash-lite"):
     """
-    Gera o Plano Estratégico de Extração via Gemini com variações semânticas
-    do nicho e mapeamento de bairros e municípios metropolitanos reais.
+    Gera o Plano Estratégico de Extração via Gemini com 6-8 variações semânticas
+    do nicho e mapeamento de 15 a 25 bairros e municípios metropolitanos reais.
     Possui fallback automático resiliente entre múltiplos modelos Gemini.
     """
     primary_model = gemini_model or "gemini-3.1-flash-lite"
-    log(f"🧠 [AI SEARCH PLANNER] Consultando Gemini ({primary_model}) para planejar varredura semântica e territorial...", "AI")
+    log(f"🧠 [AI SEARCH PLANNER] Consultando Gemini ({primary_model}) para planejar varredura semântica e territorial expandida...", "AI")
     
     city_key = cidade.lower().strip()
     city_info = CITY_GEO_DATA.get(city_key, None)
     
-    # Fallback inteligente padrão caso a API não esteja disponível
-    fallback_bairros = city_info.get("bairros", ["Centro", "Zona Comercial", "Bairro Nobre", "Jardins", "Bela Vista"]) if city_info else [
-        "Centro", "Bairro Comercial", "Jardins", "Vila Nova", "Setor Sul", "Zona Empresarial",
-        "Alto da Boa Vista", "Bela Vista", "Santa Cruz", "São José", "Planalto", "Distrito Industrial"
+    # Fallback inteligente padrão ampliado (15-25 bairros e 6-8 termos)
+    fallback_bairros = city_info.get("bairros", [
+        "Centro", "Zona Comercial", "Bairro Nobre", "Jardins", "Bela Vista", "Vila Nova",
+        "Setor Sul", "Zona Empresarial", "Alto da Boa Vista", "Santa Cruz", "São José",
+        "Planalto", "Distrito Industrial", "Jardim América", "Vila Mariana", "Pinheiros",
+        "Moema", "Brooklin", "Santana", "Tatuapé", "Santo Amaro", "Lapa", "Barra Funda"
+    ]) if city_info else [
+        "Centro", "Zona Comercial", "Bairro Nobre", "Jardins", "Bela Vista", "Vila Nova",
+        "Setor Sul", "Zona Empresarial", "Alto da Boa Vista", "Santa Cruz", "São José",
+        "Planalto", "Distrito Industrial", "Jardim América", "Vila Mariana", "Pinheiros",
+        "Moema", "Brooklin", "Santana", "Tatuapé", "Santo Amaro", "Lapa", "Barra Funda"
     ]
     if scope == "macro_metro" and city_info and "metro" in city_info:
         fallback_bairros = fallback_bairros + city_info["metro"]
@@ -255,9 +262,12 @@ def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini
     fallback_terms = [
         nicho,
         f"{nicho} Especializada",
-        f"Clínica de {nicho}" if "estética" in nicho.lower() or "odonto" in nicho.lower() or "médic" in nicho.lower() else f"Serviços de {nicho}",
-        f"{nicho} Prime",
-        f"Instituto de {nicho}"
+        f"Clínica de {nicho}" if any(w in nicho.lower() for w in ["estética", "odonto", "médic", "saúde"]) else f"Serviços de {nicho}",
+        f"{nicho} Prime & Alta Performance",
+        f"Instituto de {nicho}",
+        f"Empresa de {nicho}",
+        f"Consultoria e Assessoria em {nicho}",
+        f"Centro Especializado em {nicho}"
     ]
 
     if gemini_api_key and len(gemini_api_key) > 10:
@@ -278,26 +288,19 @@ def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini
 
         prompt = f"""
 Você é um Especialista Sênior em Inteligência Geográfica e Prospecção Comercial B2B no Brasil.
-Crie um Plano Estratégico de Busca no Google Maps para o seguinte objetivo:
+Crie um Plano Estratégico de Busca no Google Maps em Alta Escala para capturar entre 500 a 1000+ leads:
 - Nicho / Segmento: "{nicho}"
-- Cidade: "{cidade}"
+- Cidade Alvo: "{cidade}"
 - Estado / UF: "{uf}"
-- Escopo Territorial: "{scope}" ("city_center" = bairros nobres, centrais e polos comerciais de {cidade}; "macro_metro" = principais bairros de {cidade} + cidades conurbadas da região metropolitana de {cidade}).
+- Escopo Territorial: "{scope}" ("city_center" = 15 a 25 bairros nobres, comerciais e polos de alta densidade em {cidade}; "macro_metro" = 15 a 25 bairros principais de {cidade} + principais cidades conurbadas da região metropolitana de {cidade}).
 
 Retorne APENAS um JSON válido no seguinte formato estrito:
 {{
   "semanticTerms": [
-    "Variação 1 de alta intenção comercial para {nicho}",
-    "Variação 2 de serviços especializados em {nicho}",
-    "Variação 3 de procedimentos/serviços de alto ticket",
-    "Variação 4 técnica/corporativa",
-    "Variação 5 complementar"
+    "6 a 8 variações de palavras-chave comerciais de alta intenção e serviços específicos para {nicho}"
   ],
   "subregions": [
-    "Bairro Real 1",
-    "Bairro Real 2",
-    "Bairro Real 3",
-    "Bairro Real 4"
+    "Lista com 15 a 25 bairros reais e distritos comerciais de {cidade}"
   ]
 }}
 """
@@ -327,10 +330,10 @@ Retorne APENAS um JSON válido no seguinte formato estrito:
 
                     if terms and subregions:
                         log(f"✓ Plano IA gerado com sucesso via [{model_cand}]: {len(terms)} termos semânticos e {len(subregions)} sub-regiões em {cidade} - {uf}.", "SUCCESS")
-                        log(f"   Variações: {', '.join(terms[:4])}", "AI")
-                        log(f"   Áreas em foco: {', '.join(subregions[:6])}... (+{len(subregions)-6} regiões)", "AI")
+                        log(f"   Variações: {', '.join(terms[:5])}...", "AI")
+                        log(f"   Áreas em foco: {', '.join(subregions[:8])}... (+{len(subregions)-8} regiões)", "AI")
                         return {
-                            "semanticTerms": terms[:5],
+                            "semanticTerms": terms[:8],
                             "subregions": subregions[:30]
                         }
             except Exception as e:
@@ -639,7 +642,7 @@ def generate_strategic_geogrid_leads(nicho, cidade, uf, limit, scope="city_cente
 
 
 # ----------------------------------------------------------------------
-# 5. Mineração Real de Websites e E-mails Corporativos
+# 5. Mineração Real de Websites e E-mails Corporativos (Alta Velocidade)
 # ----------------------------------------------------------------------
 
 def extract_emails_from_html(html_text):
@@ -649,8 +652,14 @@ def extract_emails_from_html(html_text):
     raw_emails = re.findall(r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', html_text)
     combined = set(mailtos + raw_emails)
     valid_emails = []
-    ignored_exts = ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.css', '.js', '.woff', '.woff2')
-    ignored_domains = ('sentry.io', 'wixpress.com', 'example.com', 'domain.com', 'email.com', 'google.com', 'w3.org')
+    ignored_exts = (
+        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.css', '.js',
+        '.woff', '.woff2', '.ico', '.ttf', '.eot', '.mp4', '.pdf'
+    )
+    ignored_domains = (
+        'sentry.io', 'wixpress.com', 'example.com', 'domain.com', 'email.com',
+        'google.com', 'w3.org', 'schema.org', 'gravatar.com', 'facebook.com', 'instagram.com'
+    )
 
     for email in combined:
         email_clean = email.strip().lower()
@@ -665,8 +674,12 @@ def extract_emails_from_html(html_text):
 
 
 def scrape_website_metadata(website_url):
-    if not website_url or not website_url.startswith("http"):
+    if not website_url:
         return {"email": "", "emails": [], "about": "", "success": False}
+
+    clean_url = website_url.strip()
+    if not clean_url.startswith("http://") and not clean_url.startswith("https://"):
+        clean_url = f"https://{clean_url}"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -676,13 +689,13 @@ def scrape_website_metadata(website_url):
 
     all_emails = []
     about_text = ""
-    base_url = website_url.rstrip('/')
+    base_url = clean_url.rstrip('/')
     urls_to_check = [base_url, f"{base_url}/contato", f"{base_url}/sobre", f"{base_url}/quem-somos"]
 
     for u in urls_to_check:
         try:
             req = urllib.request.Request(u, headers=headers)
-            with urllib.request.urlopen(req, timeout=5.0) as resp:
+            with urllib.request.urlopen(req, timeout=4.0) as resp:
                 content_type = resp.headers.get("Content-Type", "")
                 if "text/html" not in content_type:
                     continue
@@ -706,22 +719,32 @@ def scrape_website_metadata(website_url):
     unique_emails = list(set(all_emails))
     primary_email = unique_emails[0] if unique_emails else ""
 
-    if not primary_email and website_url:
-        domain = clean_domain(website_url)
-        if domain:
+    if not primary_email and clean_url:
+        domain = clean_domain(clean_url)
+        if domain and "." in domain:
             primary_email = f"contato@{domain}"
             unique_emails = [primary_email]
 
     return {
         "email": primary_email,
         "emails": unique_emails,
-        "about": about_text or f"Empresa com estrutura corporativa completa e atendimento ao cliente.",
+        "about": about_text or f"Empresa com estrutura comercial ativa e atendimento ao cliente.",
         "success": bool(primary_email)
     }
 
 
+async def process_lead_website_async(lead, sem):
+    async with sem:
+        res = await asyncio.to_thread(scrape_website_metadata, lead.get("website", ""))
+        lead["email"] = res["email"]
+        lead["emails"] = res["emails"]
+        lead["aboutUs"] = res["about"]
+        lead["websiteFound"] = res["success"]
+        return bool(res["email"])
+
+
 # ----------------------------------------------------------------------
-# 6. Enriquecimento B2B com Gemini
+# 6. Enriquecimento B2B com Gemini (Opcional & Paralelizado)
 # ----------------------------------------------------------------------
 
 def generate_gemini_icebreaker(lead, seller_offer, gemini_api_key, gemini_model="gemini-3.1-flash-lite"):
@@ -789,7 +812,7 @@ Responda APENAS em formato JSON válido:
             except Exception:
                 continue
 
-    # Fallback inteligente contextual
+    # Fallback inteligente contextual instantâneo
     icebreaker = f"Acompanhei a sólida reputação da {company_name} no Google ({rating}★) e a atuação de destaque em {bairro or cidade}."
     subject = f"Oportunidade para a {company_name}"
     body = f"Olá, equipe da {company_name}!\n\nNotei a excelência de vocês em {cidade}. Desenvolvemos {seller_offer} especificamente para empresas do setor de {nicho.lower()}.\n\nPodemos conversar 10 minutos esta semana para demonstrar como apoiar o crescimento da {company_name}?"
@@ -801,11 +824,21 @@ Responda APENAS em formato JSON válido:
     }
 
 
+async def process_lead_enrichment_async(lead, seller_offer, gemini_key, gemini_model, sem):
+    async with sem:
+        ai_data = await asyncio.to_thread(generate_gemini_icebreaker, lead, seller_offer, gemini_key, gemini_model)
+        lead["icebreaker"] = ai_data["icebreaker"]
+        lead["coldEmailSubject"] = ai_data["coldEmailSubject"]
+        lead["coldEmailBody"] = ai_data["coldEmailBody"]
+        lead["enriched"] = True
+        return True
+
+
 # ----------------------------------------------------------------------
-# 7. Geração de Planilhas Excel (.XLSX) e CSV
+# 7. Geração de Planilhas Excel (.XLSX) e CSV com Temas
 # ----------------------------------------------------------------------
 
-def export_leads_to_excel(leads, file_path, nicho):
+def export_leads_to_excel(leads, file_path, nicho, theme="dark"):
     headers = [
         "Nome da Empresa", "Nicho / Categoria", "Nota Google", "Qtd Avaliações",
         "E-mail Corporativo", "Telefone", "Website", "Bairro", "Cidade", "Estado",
@@ -820,13 +853,21 @@ def export_leads_to_excel(leads, file_path, nicho):
         ws = wb.active
         ws.title = sheet_title
 
-        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        # Paleta de temas (Dark Slate vs Light Corporate)
+        if theme.lower() == "light":
+            header_color = "0F766E"  # Teal / Navy Corporate
+            zebra_color = "F1F5F9"
+        else:
+            header_color = "1E293B"  # Dark Slate
+            zebra_color = "F8FAFC"
+
+        header_fill = PatternFill(start_color=header_color, end_color=header_color, fill_type="solid")
         header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
         header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
         thin_side = Side(style="thin", color="CBD5E1")
         cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-        zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+        zebra_fill = PatternFill(start_color=zebra_color, end_color=zebra_color, fill_type="solid")
 
         ws.append(headers)
         ws.row_dimensions[1].height = 28
@@ -886,7 +927,7 @@ def export_leads_to_excel(leads, file_path, nicho):
         ws.freeze_panes = "A2"
         ws.auto_filter.ref = ws.dimensions
         wb.save(file_path)
-        log(f"Planilha Excel (.XLSX) salva com sucesso em: {file_path}", "SUCCESS")
+        log(f"Planilha Excel (.XLSX) salva com sucesso ({theme.upper()} Theme) em: {file_path}", "SUCCESS")
 
 
 def export_leads_to_csv(leads, file_path):
@@ -927,10 +968,11 @@ def export_leads_to_csv(leads, file_path):
 # 8. Pipeline Principal
 # ----------------------------------------------------------------------
 
-async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, gemini_key, seller_offer, job_id, gemini_model="gemini-3.1-flash-lite"):
+async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, gemini_key, seller_offer, job_id, gemini_model="gemini-3.1-flash-lite", enrich_gemini=False, excel_theme="dark"):
     cidade, uf = normalize_city_and_state(cidade_raw, estado_raw)
+    enrich_flag = str(enrich_gemini).lower() in ["true", "1", "yes", "t", "sim"]
     
-    log(f"🚀 Iniciando Pipeline B2B Inteligente para '{nicho}' em '{cidade}, {uf}' (Meta: {limit} leads | Escopo: {scope} | Modelo IA: {gemini_model})...", "STEP")
+    log(f"🚀 Iniciando Pipeline B2B Inteligente para '{nicho}' em '{cidade}, {uf}' (Meta: {limit} leads | Escopo: {scope} | IA Gemini: {'LIGADO' if enrich_flag else 'DESLIGADO [Ultra-Rápido]'} | Tema: {excel_theme})...", "STEP")
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. RASPAGEM GOOGLE MAPS COM AI SEARCH PLANNER
@@ -946,38 +988,35 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
 
     log(f"✓ Etapa 1 finalizada: {len(leads)} empresas únicas identificadas.", "SUCCESS")
 
-    # 2. MINERAÇÃO DE WEBSITES E E-MAILS
-    log(f"[ETAPA 2/3] Robô acessando websites corporativos para minerar e-mails institucionais...", "WEB")
-    emails_found_count = 0
-    for idx, lead in enumerate(leads):
-        web_res = scrape_website_metadata(lead.get("website", ""))
-        lead["email"] = web_res["email"]
-        lead["emails"] = web_res["emails"]
-        lead["aboutUs"] = web_res["about"]
-        lead["websiteFound"] = web_res["success"]
-        if web_res["email"]:
-            emails_found_count += 1
-            if emails_found_count % 10 == 0 or idx == len(leads) - 1:
-                log(f"  [{idx+1}/{len(leads)}] {emails_found_count} e-mails minerados com sucesso.", "SUCCESS")
-        await asyncio.sleep(0.02)
+    # 2. MINERAÇÃO DE WEBSITES E E-MAILS EM PARALELO
+    log(f"[ETAPA 2/3] Robô minerando websites corporativos em paralelo para capturar e-mails institucionais...", "WEB")
+    web_sem = asyncio.Semaphore(15)
+    web_tasks = [process_lead_website_async(lead, web_sem) for lead in leads]
+    web_results = await asyncio.gather(*web_tasks)
+    emails_found_count = sum(1 for r in web_results if r)
 
-    log(f"✓ Etapa 2 finalizada: {emails_found_count} e-mails corporativos minerados.", "SUCCESS")
+    log(f"✓ Etapa 2 finalizada: {emails_found_count} e-mails corporativos minerados em alta velocidade.", "SUCCESS")
 
-    # 3. ENRIQUECIMENTO GEMINI
-    log(f"[ETAPA 3/3] Gerando quebra-gelos hiper-personalizados com Gemini ({gemini_model})...", "AI")
+    # 3. ENRIQUECIMENTO GEMINI (CONDICIONAL & PARALELO)
     enriched_count = 0
-    for idx, lead in enumerate(leads):
-        ai_data = generate_gemini_icebreaker(lead, seller_offer, gemini_key, gemini_model)
-        lead["icebreaker"] = ai_data["icebreaker"]
-        lead["coldEmailSubject"] = ai_data["coldEmailSubject"]
-        lead["coldEmailBody"] = ai_data["coldEmailBody"]
-        lead["enriched"] = True
-        enriched_count += 1
-        if (idx + 1) % 15 == 0 or idx == len(leads) - 1:
-            log(f"  [{idx+1}/{len(leads)}] Abordagens B2B geradas com sucesso.", "AI")
-        await asyncio.sleep(0.01)
+    if enrich_flag:
+        log(f"[ETAPA 3/3] Gerando quebra-gelos hiper-personalizados em paralelo com Gemini ({gemini_model})...", "AI")
+        ai_sem = asyncio.Semaphore(10)
+        ai_tasks = [process_lead_enrichment_async(lead, seller_offer, gemini_key, gemini_model, ai_sem) for lead in leads]
+        await asyncio.gather(*ai_tasks)
+        enriched_count = len(leads)
+        log(f"✓ Etapa 3 finalizada: {enriched_count} abordagens B2B geradas com sucesso.", "SUCCESS")
+    else:
+        log(f"[ETAPA 3/3] ⏩ Enriquecimento com IA desativado pelo usuário (Modo Ultra-Rápido). Pulando para salvamento imediato da planilha...", "AI")
+        for lead in leads:
+            company_name = lead.get("name", "Empresa")
+            bairro = lead.get("suburb", "")
+            lead["icebreaker"] = f"Acompanhei a forte reputação da {company_name} e sua atuação destacada em {bairro or cidade}."
+            lead["coldEmailSubject"] = f"Oportunidade para a {company_name}"
+            lead["coldEmailBody"] = f"Olá, equipe da {company_name}!\n\nNotamos o excelente trabalho de vocês em {cidade}.\n\nDesenvolvemos soluções de {seller_offer} desenhadas para expandir a carteira de clientes.\n\nFaz sentido conversarmos 10 minutos esta semana?"
+            lead["enriched"] = False
 
-    # 4. SALVAMENTO DOS ARQUIVOS
+    # 4. SALVAMENTO DOS ARQUIVOS (Dataset Completo Sem Filtro/Truncagem)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = f"{sanitize_filename(nicho)}_{sanitize_filename(cidade)}_{timestamp}"
     
@@ -985,7 +1024,7 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
     csv_path = os.path.join(output_dir, f"{base_name}.csv")
     json_path = os.path.join(output_dir, f"{base_name}.json")
 
-    export_leads_to_excel(leads, xlsx_path, nicho)
+    export_leads_to_excel(leads, xlsx_path, nicho, theme=excel_theme)
     export_leads_to_csv(leads, csv_path)
 
     with open(json_path, "w", encoding="utf-8") as f:
@@ -997,6 +1036,8 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
             "limit": limit,
             "scope": scope,
             "geminiModel": gemini_model,
+            "enrichGemini": enrich_flag,
+            "excelTheme": excel_theme,
             "totalLeads": len(leads),
             "emailsFoundCount": emails_found_count,
             "enrichedCount": enriched_count,
@@ -1019,6 +1060,8 @@ def main():
     parser.add_argument("--gemini_model", default="gemini-3.1-flash-lite", help="Modelo Gemini a ser utilizado")
     parser.add_argument("--seller_offer", default="Prospecção e Vendas B2B", help="Oferta do vendedor")
     parser.add_argument("--job_id", default="job-manual", help="ID da tarefa")
+    parser.add_argument("--enrich_gemini", default="false", help="Gerar quebra-gelos e abordagens com Gemini (true/false)")
+    parser.add_argument("--excel_theme", default="dark", choices=["dark", "light"], help="Tema visual da planilha Excel (dark/light)")
 
     args = parser.parse_args()
 
@@ -1032,7 +1075,9 @@ def main():
         gemini_key=args.gemini_key,
         gemini_model=args.gemini_model,
         seller_offer=args.seller_offer,
-        job_id=args.job_id
+        job_id=args.job_id,
+        enrich_gemini=args.enrich_gemini,
+        excel_theme=args.excel_theme
     ))
 
 

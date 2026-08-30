@@ -26,7 +26,8 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
   const [limit, setLimit] = useState<number>(50);
   const [scope, setScope] = useState<"city_center" | "macro_metro">("city_center");
   const [autoScrapeWebsites, setAutoScrapeWebsites] = useState(true);
-  const [autoEnrichGemini, setAutoEnrichGemini] = useState(true);
+  const [autoEnrichGemini, setAutoEnrichGemini] = useState(false); // Default OFF for ultra-fast extraction
+  const [excelTheme, setExcelTheme] = useState<"dark" | "light">("dark");
   const [antiDuplication, setAntiDuplication] = useState(true);
   const [stealthMode, setStealthMode] = useState(true);
 
@@ -82,6 +83,9 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
           targetLeadsCount: limit,
           autoScrapeWebsites,
           autoEnrichGemini,
+          enrich_gemini: autoEnrichGemini,
+          excel_theme: excelTheme,
+          excelTheme,
           antiDuplication,
           stealthMode
         })
@@ -288,6 +292,87 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
                   {num} Leads
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Field 5: Enriquecimento IA Gemini (Toggle Crítico) */}
+          <div className="p-4 bg-[#0A0B0E] border border-[#22262E] space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-[#00FF9C]" />
+                <span className="text-xs font-mono font-bold text-[#E4E7EB] uppercase">
+                  🧠 Gerar Abordagens/Quebra-Gelos com Gemini
+                </span>
+              </div>
+
+              {/* Big Interactive Switch */}
+              <button
+                type="button"
+                onClick={() => setAutoEnrichGemini(!autoEnrichGemini)}
+                className={`px-3 py-1.5 font-mono text-xs font-bold border transition-all flex items-center gap-2 ${
+                  autoEnrichGemini
+                    ? "bg-[#00FF9C] text-[#0A0B0E] border-[#00FF9C] shadow-[0_0_12px_rgba(0,255,156,0.3)]"
+                    : "bg-[#1C1F26] text-[#A0A6B1] border-[#383D47] hover:text-[#E4E7EB]"
+                }`}
+              >
+                <span className={`w-2.5 h-2.5 rounded-full ${autoEnrichGemini ? "bg-[#0A0B0E]" : "bg-[#717681]"}`}></span>
+                <span>{autoEnrichGemini ? "LIGADO" : "DESLIGADO"}</span>
+              </button>
+            </div>
+
+            <p className="text-[11px] font-mono text-[#717681] leading-relaxed">
+              {autoEnrichGemini ? (
+                <span className="text-[#00FF9C]">
+                  ● <strong>LIGADO:</strong> Processa os leads em lotes paralelos com Gemini para gerar Quebra-Gelos, Cold Emails e textos de abordagem.
+                </span>
+              ) : (
+                <span className="text-[#A0A6B1]">
+                  ● <strong>DESLIGADO (Padrão Recomendado):</strong> Extração ultra-rápida! Pula a etapa de IA e entrega a planilha Excel/CSV em menos de 1 minuto.
+                </span>
+              )}
+            </p>
+          </div>
+
+          {/* Field 6: Tema da Planilha Excel */}
+          <div className="space-y-2">
+            <label className="flex items-center justify-between text-xs font-mono text-[#E4E7EB]">
+              <span className="flex items-center gap-2 font-bold uppercase">
+                <Database className="w-4 h-4 text-[#00FF9C]" />
+                Tema Visual da Planilha Excel (.XLSX)
+              </span>
+              <span className="text-[#717681] text-[11px]">Estilo corporativo formatado</span>
+            </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setExcelTheme("dark")}
+                className={`p-2.5 text-left border font-mono text-xs transition-all ${
+                  excelTheme === "dark"
+                    ? "bg-[#00FF9C]/10 border-[#00FF9C] text-[#00FF9C] font-bold"
+                    : "bg-[#0A0B0E] border-[#22262E] text-[#A0A6B1] hover:border-[#383D47]"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#1E293B] border border-white/20"></span>
+                  <span>Dark Slate (#1E293B)</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setExcelTheme("light")}
+                className={`p-2.5 text-left border font-mono text-xs transition-all ${
+                  excelTheme === "light"
+                    ? "bg-[#00FF9C]/10 border-[#00FF9C] text-[#00FF9C] font-bold"
+                    : "bg-[#0A0B0E] border-[#22262E] text-[#A0A6B1] hover:border-[#383D47]"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-[#0F766E] border border-white/20"></span>
+                  <span>Teal Navy (#0F766E)</span>
+                </div>
+              </button>
             </div>
           </div>
 
