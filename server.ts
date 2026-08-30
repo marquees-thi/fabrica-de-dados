@@ -157,8 +157,110 @@ function registerLeadInDedup(domain: string, phone: string, name: string, city: 
   saveDedupCache();
 }
 
+// State & City Normalization
+const BRAZIL_STATES_MAP: Record<string, string> = {
+  "ac": "AC", "acre": "AC",
+  "al": "AL", "alagoas": "AL",
+  "ap": "AP", "amapa": "AP", "amapá": "AP",
+  "am": "AM", "amazonas": "AM",
+  "ba": "BA", "bahia": "BA",
+  "ce": "CE", "ceara": "CE", "ceará": "CE",
+  "df": "DF", "distrito federal": "DF", "brasilia": "DF", "brasília": "DF",
+  "es": "ES", "espirito santo": "ES", "espírito santo": "ES",
+  "go": "GO", "goias": "GO", "goiás": "GO",
+  "ma": "MA", "maranhao": "MA", "maranhão": "MA",
+  "mt": "MT", "mato grosso": "MT",
+  "ms": "MS", "mato grosso do sul": "MS",
+  "mg": "MG", "minas gerais": "MG", "minas": "MG",
+  "pa": "PA", "para": "PA", "pará": "PA",
+  "pb": "PB", "paraiba": "PB", "paraíba": "PB",
+  "pr": "PR", "parana": "PR", "paraná": "PR",
+  "pe": "PE", "pernambuco": "PE",
+  "pi": "PI", "piaui": "PI", "piauí": "PI",
+  "rj": "RJ", "rio de janeiro": "RJ", "rio": "RJ",
+  "rn": "RN", "rio grande do norte": "RN",
+  "rs": "RS", "rio grande do sul": "RS", "gaucho": "RS", "gaúcho": "RS",
+  "ro": "RO", "rondonia": "RO", "rondônia": "RO",
+  "rr": "RR", "roraima": "RR",
+  "sc": "SC", "santa catarina": "SC",
+  "sp": "SP", "sao paulo": "SP", "são paulo": "SP", "paulista": "SP",
+  "se": "SE", "sergipe": "SE",
+  "to": "TO", "tocantins": "TO"
+};
+
+const KNOWN_CITIES_MAP: Record<string, string> = {
+  "curitiba": "PR", "londrina": "PR", "maringá": "PR", "maringa": "PR", "cascavel": "PR",
+  "ponta grossa": "PR", "foz do iguaçu": "PR", "foz do iguacu": "PR", "são josé dos pinhais": "PR",
+  "sao jose dos pinhais": "PR", "colombo": "PR", "pinhais": "PR", "araucária": "PR", "araucaria": "PR",
+  "guarapuava": "PR", "paranaguá": "PR", "paranagua": "PR", "toledo": "PR", "apucarana": "PR",
+  
+  "são paulo": "SP", "sao paulo": "SP", "campinas": "SP", "guarulhos": "SP", "são bernardo do campo": "SP",
+  "santo andré": "SP", "osasco": "SP", "são josé dos campos": "SP", "ribeirão preto": "SP", "sorocaba": "SP",
+  "santos": "SP", "são josé do rio preto": "SP", "jundiaí": "SP", "piracicaba": "SP", "bauru": "SP",
+  
+  "rio de janeiro": "RJ", "niterói": "RJ", "niteroi": "RJ", "são gonçalo": "RJ", "duque de caxias": "RJ",
+  "nova iguaçu": "RJ", "petrópolis": "RJ", "petropolis": "RJ", "volta redonda": "RJ", "macaé": "RJ", "macae": "RJ",
+  
+  "belo horizonte": "MG", "uberlândia": "MG", "uberlandia": "MG", "contagem": "MG", "juiz de fora": "MG",
+  "betim": "MG", "montes claros": "MG", "uberaba": "MG", "governador valadares": "MG", "ipatinga": "MG",
+  
+  "porto alegre": "RS", "caxias do sul": "RS", "canoas": "RS", "pelotas": "RS", "santa maria": "RS",
+  "gravataí": "RS", "gravatai": "RS", "viamao": "RS", "viamão": "RS", "novo hamburgo": "RS", "passo fundo": "RS",
+  
+  "florianópolis": "SC", "florianopolis": "SC", "joinville": "SC", "blumenau": "SC", "são josé": "SC",
+  "sao jose": "SC", "chapecó": "SC", "chapeco": "SC", "criciúma": "SC", "criciuma": "SC", "itajai": "SC",
+  "itajaí": "SC", "balneário camboriú": "SC", "balneario camboriu": "SC", "jaraguá do sul": "SC",
+  
+  "salvador": "BA", "feira de santana": "BA", "vitória da conquista": "BA", "camaçari": "BA", "lauro de freitas": "BA",
+  "recife": "PE", "jaboatão dos guararapes": "PE", "olinda": "PE", "caruaru": "PE", "petrolina": "PE",
+  "fortaleza": "CE", "caucaia": "CE", "juazeiro do norte": "CE", "maracanaú": "CE", "sobral": "CE",
+  "goiânia": "GO", "goiania": "GO", "aparecida de goiânia": "GO", "anápolis": "GO", "rio verde": "GO",
+  "brasília": "DF", "brasilia": "DF", "taguatinga": "DF", "ceilândia": "DF", "águas claras": "DF",
+  "vitória": "ES", "vitoria": "ES", "vila velha": "ES", "serra": "ES", "cariacica": "ES",
+  "manaus": "AM", "belém": "PA", "belem": "PA", "cuiabá": "MT", "cuiaba": "MT", "campo grande": "MS",
+  "natal": "RN", "joão pessoa": "PB", "maceió": "AL", "teresina": "PI", "são luís": "MA", "aracaju": "SE", "porto velho": "RO", "palmas": "TO"
+};
+
+function normalizeCityAndState(cityInput: string, stateInput: string = ""): { city: string; state: string; formatted: string } {
+  const raw = (cityInput || "").trim();
+  const parts = raw.split(/[,/\-\(\)]+/);
+  const cleanCity = parts[0].trim();
+  const rawState = (parts[1] ? parts[1].trim() : (stateInput || "").trim()).toLowerCase();
+
+  let resolvedUf = BRAZIL_STATES_MAP[rawState] || "";
+
+  const cityKey = cleanCity.toLowerCase().trim();
+  if (!resolvedUf && KNOWN_CITIES_MAP[cityKey]) {
+    resolvedUf = KNOWN_CITIES_MAP[cityKey];
+  }
+
+  if (!resolvedUf) {
+    for (const [k, v] of Object.entries(CITY_GEO_DATA)) {
+      if (k.includes(cityKey) || cityKey.includes(k)) {
+        resolvedUf = (v as any).state || "SP";
+        break;
+      }
+    }
+  }
+
+  if (!resolvedUf) {
+    resolvedUf = "SP";
+  }
+
+  const cleanCityTitle = cleanCity.split(" ").map(w => {
+    const l = w.toLowerCase();
+    return ["de", "da", "do", "dos", "das", "e"].includes(l) ? l : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  }).join(" ");
+
+  return {
+    city: cleanCityTitle,
+    state: resolvedUf.toUpperCase(),
+    formatted: `${cleanCityTitle}, ${resolvedUf.toUpperCase()}`
+  };
+}
+
 // City coordinates and sample neighborhoods
-const CITY_GEO_DATA: Record<string, { lat: number; lon: number; radiusM: number; bairros: string[] }> = {
+const CITY_GEO_DATA: Record<string, { lat: number; lon: number; radiusM: number; bairros: string[]; state?: string }> = {
   "são paulo": {
     lat: -23.55052,
     lon: -46.633308,
@@ -869,22 +971,14 @@ async function executeNodeJob(job: BackgroundJobRecord) {
         return;
       }
 
-      let cityName = city.trim();
-      let stateName = "SP";
-      if (cityName.includes("-")) {
-        const parts = cityName.split("-");
-        cityName = parts[0].trim();
-        stateName = parts[1].trim();
-      } else if (cityName.includes("/")) {
-        const parts = cityName.split("/");
-        cityName = parts[0].trim();
-        stateName = parts[1].trim();
-      }
+      const normLoc = normalizeCityAndState(city);
+      const cityName = normLoc.city;
+      const stateName = normLoc.state;
 
-      // STEP 1: Varredura Google Maps / OSM com Geo-Grid
-      job.currentStep = `1. Varrendo malha Geo-Grid no Maps [${niche}] em [${cityName}]...`;
+      // STEP 1: Varredura Google Maps / OSM com Geo-Grid e AI Search Planner
+      job.currentStep = `1. Executando Plano de Busca IA no Google Maps [${niche}] em [${cityName}, ${stateName}]...`;
       job.progressPercent = 25;
-      const step1Msg = `[${new Date().toLocaleTimeString()}] 📍 [ETAPA 1/3] Geo-Grid Ativo: Varrendo malha GPS em ${cityName} (${scope === "macro_metro" ? "Macro-Região / Metropolitana" : "Município Central"}) para "${niche}"... Meta: ${limit} leads.`;
+      const step1Msg = `[${new Date().toLocaleTimeString()}] 📍 [ETAPA 1/3] Plano de Busca IA: Varrendo '${cityName}, ${stateName}' (${scope === "macro_metro" ? "Macro-Região Metropolitana" : "Município Central"}) para "${niche}"... Meta: ${limit} leads.`;
       job.logs.push(step1Msg);
       broadcastJobEvent(job.id, "log", { message: step1Msg });
       broadcastJobEvent(job.id, "progress", { percent: 25, step: job.currentStep });
@@ -906,8 +1000,10 @@ async function executeNodeJob(job: BackgroundJobRecord) {
         } else {
           registerLeadInDedup(lead.website || "", lead.phone || "", lead.name, cityName);
           filteredBatch.push(lead);
-          if (bIdx % 12 === 0 || bIdx === rawBatch.length - 1) {
-            const tileMsg = `[${new Date().toLocaleTimeString()}] 📍 [GEO-GRID TILE ${Math.floor(bIdx / 15) + 1}] Bairro: ${lead.suburb} | GPS: (${lead.lat}, ${lead.lon}) | Leads únicos: ${filteredBatch.length}/${limit}`;
+          if (bIdx % 10 === 0 || bIdx === rawBatch.length - 1) {
+            const stepNum = Math.floor(bIdx / 15) + 1;
+            const totalStepsEstimated = Math.max(1, Math.ceil(limit / 15));
+            const tileMsg = `[${new Date().toLocaleTimeString()}] 📍 [PLANO IA ${stepNum}/${totalStepsEstimated}] Buscando '${niche}' em ${lead.suburb || cityName} | Leads acumulados: ${filteredBatch.length}/${limit}`;
             job.logs.push(tileMsg);
             broadcastJobEvent(job.id, "log", { message: tileMsg });
           }
@@ -1015,17 +1111,10 @@ async function executeJobInBackground(jobId: string) {
 
   const scriptPath = path.join(process.cwd(), "scraper_pipeline.py");
   const firstNiche = job.niches[0] || "Empresas";
-  let firstCity = job.cities[0] || "São Paulo";
-  let firstState = "SP";
-  if (firstCity.includes("-")) {
-    const parts = firstCity.split("-");
-    firstCity = parts[0].trim();
-    firstState = parts[1].trim();
-  } else if (firstCity.includes("/")) {
-    const parts = firstCity.split("/");
-    firstCity = parts[0].trim();
-    firstState = parts[1].trim();
-  }
+  const rawCity = job.cities[0] || "São Paulo";
+  const normLoc = normalizeCityAndState(rawCity);
+  const firstCity = normLoc.city;
+  const firstState = normLoc.state;
 
   const pyArgs = [
     scriptPath,
@@ -1835,12 +1924,13 @@ FORMATO DE RESPOSTA (JSON estrito):
   // Fast OSM Live Garimpo
   app.post("/api/osm-garimpar", async (req, res) => {
     const { cidade = "São Paulo", estado = "SP", nicho = "marketing", limit = 40 } = req.body;
-    const leads = generateFallbackLeads(cidade, estado, nicho, limit);
+    const norm = normalizeCityAndState(cidade, estado);
+    const leads = generateFallbackLeads(norm.city, norm.state, nicho, limit);
     res.json({
       success: true,
       count: leads.length,
-      cidade,
-      estado,
+      cidade: norm.city,
+      estado: norm.state,
       nicho,
       companies: leads,
     });
