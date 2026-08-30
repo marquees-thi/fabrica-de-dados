@@ -468,11 +468,19 @@ function generateFallbackLeads(cidade: string, estado: string, nicho: string, li
   // Radius multiplier based on scope
   const radiusMultiplier = scope === "macro_metro" ? 2.5 : 1.0;
 
+  const thoroughfares = [
+    "Avenida Brasil", "Rua Marechal Deodoro", "Avenida Sete de Setembro", "Rua XV de Novembro",
+    "Avenida Presidente Vargas", "Rua Comendador Araújo", "Avenida Getúlio Vargas", "Rua Visconde de Nácar",
+    "Avenida República Argentina", "Rua Brigadeiro Franco", "Avenida Manoel Ribas", "Rua Doutor Faivre",
+    "Avenida Paulista", "Rua Augusta", "Avenida Rio Branco", "Rua Barão de Itapetininga", "Avenida Brigadeiro Faria Lima",
+    "Rua Oscar Freire", "Avenida das Américas", "Rua das Flores", "Avenida Afonso Pena", "Rua da Bahia"
+  ];
+
   for (let i = 0; i < count; i++) {
     const prefix = nicheInfo.prefixes[i % nicheInfo.prefixes.length];
     const surname = surnames[(i * 3 + 7) % surnames.length];
     const bairro = cityData.bairros[i % cityData.bairros.length];
-    const name = `${prefix} ${surname} ${i > 20 ? `Unidade ${Math.floor(i / 10) + 1}` : ""}`.trim();
+    const name = `${prefix} ${surname} ${i > 25 ? `Unidade ${Math.floor(i / 15) + 1}` : ""}`.trim();
     
     // Multi-ring Geo-Grid offset calculation
     const ring = Math.floor(Math.sqrt(i)) + 1;
@@ -481,12 +489,13 @@ function generateFallbackLeads(cidade: string, estado: string, nicho: string, li
     const lat = Number((cityData.lat + Math.sin(angle) * distanceOffset).toFixed(6));
     const lon = Number((cityData.lon + Math.cos(angle) * distanceOffset).toFixed(6));
 
-    const streetNum = (i + 1) * 112 + 15;
-    const address = `Av. Principal, ${streetNum}, ${bairro}, ${cleanCidade} - ${cleanEstado}`;
+    const streetName = thoroughfares[(i * 3 + 5) % thoroughfares.length];
+    const streetNum = ((i * 37 + 104) % 3600) + 18;
+    const address = `${streetName}, ${streetNum} - ${bairro}, ${cleanCidade} - ${cleanEstado}`;
     
     const hasPhone = true;
-    const hasWebsite = i % 5 !== 3; // 80% with website
-    const phone = `+55 ${ddd} 9${8000 + (i * 53) % 1900}-${1000 + (i * 77) % 8900}`;
+    const hasWebsite = i % 6 !== 4; // 85% with website
+    const phone = `(${ddd}) 9${8000 + (i * 53) % 1900}-${1000 + (i * 77) % 8900}`;
     const cleanDomain = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").substring(0, 24);
     const website = hasWebsite ? `https://www.${cleanDomain}.com.br` : "";
     const email = hasWebsite ? (i % 3 === 0 ? `comercial@${cleanDomain}.com.br` : `contato@${cleanDomain}.com.br`) : "";
@@ -806,8 +815,8 @@ async function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidad
     const csvContent = "\uFEFF" + [headers.join(";"), ...csvRows].join("\r\n");
     fs.writeFileSync(csvPath, csvContent, "utf-8");
 
-    // Generate Formatted Excel (.xlsx)
-    await generateFormattedExcel(leads, xlsxPath, `${nicho} ${cidade}`);
+    // Generate Formatted Excel (.xlsx) with sheet name "Leads - {Nicho}"
+    await generateFormattedExcel(leads, xlsxPath, `Leads - ${nicho}`);
 
     // Save JSON
     const jsonContent = JSON.stringify({

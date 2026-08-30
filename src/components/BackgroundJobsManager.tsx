@@ -55,8 +55,8 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
   const [sendingWebhook, setSendingWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState<string | null>(null);
 
-  // Smart Logs Terminal Auto-scroll
-  const [autoScroll, setAutoScroll] = useState(true);
+  // Smart Logs Terminal Auto-scroll (Disabled by default per user specification)
+  const [autoScroll, setAutoScroll] = useState(false);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
