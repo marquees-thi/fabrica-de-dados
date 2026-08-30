@@ -674,6 +674,7 @@ export interface BackgroundJobRecord {
     rotateProxies: boolean;
     autoEnrichGemini: boolean;
     autoScrapeWebsites: boolean;
+    excelTheme?: "dark" | "light";
   };
 }
 
@@ -746,23 +747,28 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
 
     worksheet.columns = columns;
 
-    const headerColor = theme === "light" ? "FF0F766E" : "FF1E293B";
-    const zebraColor = theme === "light" ? "FFF1F5F9" : "FFF8FAFC";
+    const isLight = theme === "light";
+    const headerBg = isLight ? "FF1E40AF" : "FF0B0F19";
+    const headerFg = isLight ? "FFFFFFFF" : "FF38BDF8";
+    const primaryBg = isLight ? "FFFFFFFF" : "FF1E293B";
+    const zebraBg = isLight ? "FFF8FAFC" : "FF0F172A";
+    const cellFg = isLight ? "FF0F172A" : "FFF8FAFC";
+    const borderColor = isLight ? "FFCBD5E1" : "FF334155";
 
-    // Header row style (Slate / Dark Blue #1E293B or Teal #0F766E, White text, Bold, Height 28, Centered)
+    // Header row style (Royal Blue #1E40AF for light, Graphite Black #0B0F19 with Neon Cyan #38BDF8 for dark)
     const headerRow = worksheet.getRow(1);
     headerRow.height = 28;
     headerRow.eachCell((cell) => {
       cell.fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: headerColor }
+        fgColor: { argb: headerBg }
       };
       cell.font = {
         name: "Calibri",
         size: 11,
         bold: true,
-        color: { argb: "FFFFFFFF" }
+        color: { argb: headerFg }
       };
       cell.alignment = {
         vertical: "middle",
@@ -770,10 +776,10 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
         wrapText: false
       };
       cell.border = {
-        top: { style: "thin", color: { argb: "FF334155" } },
-        left: { style: "thin", color: { argb: "FF334155" } },
-        bottom: { style: "medium", color: { argb: "FF0F172A" } },
-        right: { style: "thin", color: { argb: "FF334155" } }
+        top: { style: "thin", color: { argb: borderColor } },
+        left: { style: "thin", color: { argb: borderColor } },
+        bottom: { style: "medium", color: { argb: borderColor } },
+        right: { style: "thin", color: { argb: borderColor } }
       };
     });
 
@@ -783,9 +789,10 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
       to: { row: 1, column: columns.length }
     };
 
-    // Add rows with zebra styling (#F8FAFC on even rows)
+    // Add rows with zebra styling
     leads.forEach((lead, index) => {
       const isEven = (index + 1) % 2 === 0;
+      const rowFillColor = isEven ? zebraBg : primaryBg;
       const phoneRaw = lead.phone || "";
       const cleanPhoneDigits = phoneRaw.replace(/\D/g, "");
       const waLink = cleanPhoneDigits ? `https://wa.me/${cleanPhoneDigits.startsWith("55") ? cleanPhoneDigits : "55" + cleanPhoneDigits}` : "";
@@ -813,7 +820,7 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
       row.height = 20;
 
       row.eachCell((cell, colNumber) => {
-        cell.font = { name: "Calibri", size: 10 };
+        cell.font = { name: "Calibri", size: 10, color: { argb: cellFg } };
         cell.alignment = { vertical: "middle" };
         
         // Numbers alignment
@@ -821,19 +828,17 @@ async function generateFormattedExcel(leads: any[], outputPath: string, sheetTit
           cell.alignment = { vertical: "middle", horizontal: "center" };
         }
 
-        if (isEven) {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: zebraColor }
-          };
-        }
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: rowFillColor }
+        };
 
         cell.border = {
-          top: { style: "thin", color: { argb: "FFE2E8F0" } },
-          left: { style: "thin", color: { argb: "FFE2E8F0" } },
-          bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
-          right: { style: "thin", color: { argb: "FFE2E8F0" } }
+          top: { style: "thin", color: { argb: borderColor } },
+          left: { style: "thin", color: { argb: borderColor } },
+          bottom: { style: "thin", color: { argb: borderColor } },
+          right: { style: "thin", color: { argb: borderColor } }
         };
       });
     });
@@ -1132,7 +1137,7 @@ async function executeJobInBackground(jobId: string) {
     "--seller_offer", currentSettings.sellerOffer || "Soluções Comerciais e Prospecção B2B",
     "--job_id", jobId,
     "--enrich_gemini", job.settingsUsed?.autoEnrichGemini ? "true" : "false",
-    "--excel_theme", (currentSettings as any).excelTheme || "dark"
+    "--excel_theme", job.settingsUsed?.excelTheme || (currentSettings as any).excelTheme || "dark"
   ];
 
   let pythonSpawned = false;
@@ -1678,6 +1683,7 @@ async function startServer() {
         rotateProxies: currentSettings.rotateProxies,
         autoEnrichGemini: shouldEnrichGemini,
         autoScrapeWebsites: autoScrapeWebsites !== false && currentSettings.autoScrapeWebsites,
+        excelTheme: chosenTheme as "dark" | "light"
       }
     };
 
@@ -1791,6 +1797,112 @@ async function startServer() {
       }
       res.status(404).json({ error: "Arquivo não encontrado." });
     } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get("/api/jobs/:id/results", (req, res) => {
+    try {
+      const jobId = req.params.id;
+      const job = backgroundJobs.find(j => j.id === jobId);
+
+      // 1. Try reading directly from the corresponding JSON file in outputs directory
+      const directJsonPath = path.join(OUTPUTS_DIR, `${jobId}.json`);
+      if (fs.existsSync(directJsonPath)) {
+        try {
+          const raw = fs.readFileSync(directJsonPath, "utf-8");
+          const parsed = JSON.parse(raw);
+          const leads = Array.isArray(parsed.leads) ? parsed.leads : (Array.isArray(parsed) ? parsed : []);
+          
+          // Also sync in-memory job if needed
+          if (job && leads.length > 0 && (!job.leads || job.leads.length < leads.length)) {
+            job.leads = leads;
+            job.leadsCollected = leads.length;
+            if (parsed.emailsFoundCount) job.emailsFoundCount = parsed.emailsFoundCount;
+            if (parsed.enrichedCount) job.enrichedCount = parsed.enrichedCount;
+            saveJobsToDisk();
+          }
+
+          return res.json({
+            success: true,
+            jobId,
+            totalLeads: leads.length,
+            leads,
+            meta: {
+              nicho: parsed.nicho || (job ? job.niches[0] : ""),
+              cidade: parsed.cidade || (job ? job.cities[0] : ""),
+              emailsFoundCount: parsed.emailsFoundCount || (job ? job.emailsFoundCount : 0),
+              enrichedCount: parsed.enrichedCount || (job ? job.enrichedCount : 0),
+              createdAt: parsed.createdAt || (job ? job.createdAt : new Date().toISOString())
+            }
+          });
+        } catch (readErr: any) {
+          console.error(`Erro ao ler JSON da tarefa ${jobId}:`, readErr);
+        }
+      }
+
+      // 2. Check if outputJsonFile is specified on the job
+      if (job && job.outputJsonFile) {
+        const altJsonPath = path.join(OUTPUTS_DIR, path.basename(job.outputJsonFile));
+        if (fs.existsSync(altJsonPath)) {
+          try {
+            const raw = fs.readFileSync(altJsonPath, "utf-8");
+            const parsed = JSON.parse(raw);
+            const leads = Array.isArray(parsed.leads) ? parsed.leads : (Array.isArray(parsed) ? parsed : []);
+            return res.json({
+              success: true,
+              jobId,
+              totalLeads: leads.length,
+              leads,
+              meta: {
+                nicho: parsed.nicho || job.niches[0],
+                cidade: parsed.cidade || job.cities[0],
+                emailsFoundCount: parsed.emailsFoundCount || job.emailsFoundCount || 0,
+                enrichedCount: parsed.enrichedCount || job.enrichedCount || 0,
+                createdAt: parsed.createdAt || job.createdAt
+              }
+            });
+          } catch (e) {}
+        }
+      }
+
+      // 3. Fallback to in-memory leads array if file is not yet generated or different name
+      if (job && Array.isArray(job.leads) && job.leads.length > 0) {
+        return res.json({
+          success: true,
+          jobId,
+          totalLeads: job.leads.length,
+          leads: job.leads,
+          meta: {
+            nicho: job.niches[0] || "",
+            cidade: job.cities[0] || "",
+            emailsFoundCount: job.emailsFoundCount || 0,
+            enrichedCount: job.enrichedCount || 0,
+            createdAt: job.createdAt
+          }
+        });
+      }
+
+      // If job exists but has 0 leads
+      if (job) {
+        return res.json({
+          success: true,
+          jobId,
+          totalLeads: 0,
+          leads: [],
+          meta: {
+            nicho: job.niches[0] || "",
+            cidade: job.cities[0] || "",
+            emailsFoundCount: 0,
+            enrichedCount: 0,
+            createdAt: job.createdAt
+          }
+        });
+      }
+
+      return res.status(404).json({ success: false, error: "Tarefa ou resultados não encontrados." });
+    } catch (err: any) {
+      console.error("Erro em GET /api/jobs/:id/results:", err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

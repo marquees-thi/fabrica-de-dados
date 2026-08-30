@@ -853,21 +853,42 @@ def export_leads_to_excel(leads, file_path, nicho, theme="dark"):
         ws = wb.active
         ws.title = sheet_title
 
-        # Paleta de temas (Dark Slate vs Light Corporate)
+        # Paletas estéticas completas conforme especificação (Light Minimalist vs Dark Futuristic)
         if theme.lower() == "light":
-            header_color = "0F766E"  # Teal / Navy Corporate
-            zebra_color = "F1F5F9"
+            # TEMA CLARO (Light Minimalist):
+            # Cabeçalho: Fundo Azul Royal #1E40AF, Texto Branco em Negrito
+            # Linhas de dados: Fundo Branco #FFFFFF e alternadas #F8FAFC
+            # Texto das células: #0F172A (Preto Suave)
+            # Bordas: Cinza suave #CBD5E1
+            header_bg = "1E40AF"
+            header_fg = "FFFFFF"
+            cell_bg_primary = "FFFFFF"
+            cell_bg_zebra = "F8FAFC"
+            cell_fg = "0F172A"
+            border_color = "CBD5E1"
         else:
-            header_color = "1E293B"  # Dark Slate
-            zebra_color = "F8FAFC"
+            # TEMA ESCURO (Dark Futuristic):
+            # Cabeçalho: Fundo Preto Grafite #0B0F19, Texto Ciano/Neon #38BDF8 em Negrito
+            # Linhas de dados: Fundo Cinza Escuro #1E293B e alternadas #0F172A
+            # Texto das células: #F8FAFC (Branco Suave)
+            # Bordas: Cinza grafite #334155
+            header_bg = "0B0F19"
+            header_fg = "38BDF8"
+            cell_bg_primary = "1E293B"
+            cell_bg_zebra = "0F172A"
+            cell_fg = "F8FAFC"
+            border_color = "334155"
 
-        header_fill = PatternFill(start_color=header_color, end_color=header_color, fill_type="solid")
-        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color=header_bg, end_color=header_bg, fill_type="solid")
+        header_font = Font(name="Calibri", size=11, bold=True, color=header_fg)
         header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        thin_side = Side(style="thin", color="CBD5E1")
+        thin_side = Side(style="thin", color=border_color)
         cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
-        zebra_fill = PatternFill(start_color=zebra_color, end_color=zebra_color, fill_type="solid")
+
+        primary_fill = PatternFill(start_color=cell_bg_primary, end_color=cell_bg_primary, fill_type="solid")
+        zebra_fill = PatternFill(start_color=cell_bg_zebra, end_color=cell_bg_zebra, fill_type="solid")
+        cell_font = Font(name="Calibri", size=10, color=cell_fg)
 
         ws.append(headers)
         ws.row_dimensions[1].height = 28
@@ -901,11 +922,14 @@ def export_leads_to_excel(leads, file_path, nicho, theme="dark"):
             ws.append(row_data)
             ws.row_dimensions[row_idx].height = 22
 
+            is_zebra = (row_idx % 2 == 1)
+            row_fill = zebra_fill if is_zebra else primary_fill
+
             for col_idx in range(1, len(headers) + 1):
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.border = cell_border
-                if row_idx % 2 == 1:
-                    cell.fill = zebra_fill
+                cell.fill = row_fill
+                cell.font = cell_font
 
                 if col_idx == 3:
                     cell.number_format = '0.0'

@@ -96,7 +96,28 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
       const res = await fetch(`/api/jobs/${jobId}`);
       const data = await res.json();
       if (data.success && data.job) {
-        setSelectedJob(data.job);
+        let loadedJob: BackgroundJob = data.job;
+
+        // Se a tarefa estiver concluída ou tiver arquivo de resultado, busque o conjunto completo de dados reais do backend
+        if (loadedJob.status === "completed" || loadedJob.outputJsonFile || loadedJob.outputXlsxFile || loadedJob.outputCsvFile) {
+          try {
+            const resultsRes = await fetch(`/api/jobs/${jobId}/results`);
+            const resultsData = await resultsRes.json();
+            if (resultsData.success && Array.isArray(resultsData.leads) && resultsData.leads.length > 0) {
+              loadedJob = {
+                ...loadedJob,
+                leads: resultsData.leads,
+                leadsCollected: resultsData.leads.length,
+                emailsFoundCount: resultsData.meta?.emailsFoundCount ?? loadedJob.emailsFoundCount,
+                enrichedCount: resultsData.meta?.enrichedCount ?? loadedJob.enrichedCount,
+              };
+            }
+          } catch (resultsErr) {
+            console.warn("Não foi possível carregar resultados completos do job via /results:", resultsErr);
+          }
+        }
+
+        setSelectedJob(loadedJob);
       }
     } catch (err) {
       console.error("Erro ao buscar detalhes da tarefa:", err);
