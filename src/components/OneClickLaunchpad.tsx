@@ -24,6 +24,7 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
   const [niche, setNiche] = useState("Clínicas Odontológicas");
   const [location, setLocation] = useState("Curitiba, Paraná");
   const [limit, setLimit] = useState<number>(50);
+  const [scope, setScope] = useState<"city_center" | "macro_metro">("city_center");
   const [autoScrapeWebsites, setAutoScrapeWebsites] = useState(true);
   const [autoEnrichGemini, setAutoEnrichGemini] = useState(true);
   const [antiDuplication, setAntiDuplication] = useState(true);
@@ -66,15 +67,23 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
       setLoading(true);
       setSuccessMessage(null);
 
-      const res = await fetch("/api/jobs/create", {
+      const res = await fetch("/api/jobs/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: `Extração [${niche}] em [${location}]`,
+          title: `Extração [${niche.trim()}] em [${location.trim()}]`,
           type: "one_click_launch",
-          cities: [location],
-          niches: [niche],
+          niche: niche.trim(),
+          niches: [niche.trim()],
+          city: location.trim(),
+          cities: [location.trim()],
+          scope: scope,
           limit: limit,
+          targetLeadsCount: limit,
+          autoScrapeWebsites,
+          autoEnrichGemini,
+          antiDuplication,
+          stealthMode
         })
       });
 
@@ -86,7 +95,7 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
         }
         setTimeout(() => {
           onNavigate("background_jobs");
-        }, 1200);
+        }, 1000);
       } else {
         alert("Erro ao disparar tarefa: " + (data.error || "Falha desconhecida"));
       }
@@ -197,18 +206,75 @@ export const OneClickLaunchpad: React.FC<OneClickLaunchpadProps> = ({ onNavigate
             </div>
           </div>
 
-          {/* Field 3: Quantidade Limite */}
+          {/* Field 3: Escopo Geográfico (Geo-Grid) */}
+          <div className="space-y-2">
+            <label className="flex items-center justify-between text-xs font-mono text-[#E4E7EB]">
+              <span className="flex items-center gap-2 font-bold uppercase">
+                <Database className="w-4 h-4 text-[#00FF9C]" />
+                3. Escopo Geográfico & Malha Geo-Grid
+              </span>
+              <span className="text-[#00FF9C] text-[11px]">
+                {scope === "city_center" ? "Raio ~10km (Núcleo Urbano)" : "Raio ~35km (Região Metropolitana)"}
+              </span>
+            </label>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setScope("city_center")}
+                className={`p-3 text-left border font-mono transition-all ${
+                  scope === "city_center"
+                    ? "bg-[#00FF9C]/10 border-[#00FF9C] text-[#E4E7EB] shadow-[0_0_12px_rgba(0,255,156,0.15)]"
+                    : "bg-[#0A0B0E] border-[#22262E] text-[#A0A6B1] hover:border-[#383D47]"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#E4E7EB] flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${scope === "city_center" ? "bg-[#00FF9C]" : "bg-[#717681]"}`}></span>
+                    Município Central
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[#1C1F26] text-[#00FF9C]">Alta Densidade</span>
+                </div>
+                <p className="text-[11px] text-[#717681] mt-1">
+                  Varre os bairros centrais e comerciais da cidade selecionada (raio de 8 a 12 km).
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScope("macro_metro")}
+                className={`p-3 text-left border font-mono transition-all ${
+                  scope === "macro_metro"
+                    ? "bg-[#00FF9C]/10 border-[#00FF9C] text-[#E4E7EB] shadow-[0_0_12px_rgba(0,255,156,0.15)]"
+                    : "bg-[#0A0B0E] border-[#22262E] text-[#A0A6B1] hover:border-[#383D47]"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[#E4E7EB] flex items-center gap-1.5">
+                    <span className={`w-2 h-2 rounded-full ${scope === "macro_metro" ? "bg-[#00FF9C]" : "bg-[#717681]"}`}></span>
+                    Região Metropolitana
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-[#1C1F26] text-[#00FF9C]">Macro Geo-Grid</span>
+                </div>
+                <p className="text-[11px] text-[#717681] mt-1">
+                  Varre a capital + cidades satélites conurbadas via malha multi-tile (raio de 30 a 45 km).
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Field 4: Quantidade Limite */}
           <div className="space-y-2">
             <label className="flex items-center justify-between text-xs font-mono text-[#E4E7EB]">
               <span className="flex items-center gap-2 font-bold uppercase">
                 <Layers className="w-4 h-4 text-[#00FF9C]" />
-                3. Quantidade Limite de Empresas
+                4. Quantidade Alvo de Empresas
               </span>
-              <span className="text-[#00FF9C] font-bold">{limit} leads selecionados</span>
+              <span className="text-[#00FF9C] font-bold">{limit} leads configurados</span>
             </label>
 
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-              {[25, 50, 100, 250, 500].map((num) => (
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {[25, 50, 100, 250, 500, 1000].map((num) => (
                 <button
                   key={num}
                   type="button"

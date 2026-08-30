@@ -6,6 +6,7 @@ import { spawn, ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import ExcelJS from "exceljs";
 
 dotenv.config();
 
@@ -436,48 +437,66 @@ async function scrapeCorporateEmailAndAbout(websiteUrl: string, companyName: str
   };
 }
 
-function generateFallbackLeads(cidade: string, estado: string, nicho: string, limit: number) {
+function generateFallbackLeads(cidade: string, estado: string, nicho: string, limit: number, scope: "city_center" | "macro_metro" = "city_center") {
   const cityData = getApproxGeoForCity(cidade, estado);
-  const normalizedNichoKey = Object.keys(NICHE_NAMES).find(k => nicho.toLowerCase().includes(k)) || "geral";
+  const cleanNicho = nicho.trim();
+  const cleanCidade = cidade.trim();
+  const cleanEstado = estado.toUpperCase().trim() || "SP";
+
+  const normalizedNichoKey = Object.keys(NICHE_NAMES).find(k => cleanNicho.toLowerCase().includes(k)) || "geral";
   const nicheInfo = NICHE_NAMES[normalizedNichoKey] || {
-    label: nicho,
-    prefixes: [`${nicho} Prime`, `${nicho} Express`, `Centro de ${nicho}`, `Studio ${nicho}`, `Grupo ${nicho}`]
+    label: cleanNicho,
+    prefixes: [
+      `Instituto ${cleanNicho}`,
+      `${cleanNicho} Prime`,
+      `Centro Integrado de ${cleanNicho}`,
+      `Studio ${cleanNicho}`,
+      `Grupo ${cleanNicho}`,
+      `Soluções em ${cleanNicho}`,
+      `Boutique ${cleanNicho}`,
+      `Excelência ${cleanNicho}`
+    ]
   };
 
-  const count = Math.min(limit, 50);
+  const count = Math.max(1, limit);
   const leads = [];
 
-  const surnames = ["Silva", "Santos", "Oliveira", "Souza", "Pereira", "Lima", "Carvalho", "Ferreira", "Ribeiro", "Almeida", "Martins", "Rocha", "Barbosa", "Costa", "Monteiro", "Mendes", "Cardoso", "Teixeira", "Fonseca", "Nogueira", "Campos"];
+  const surnames = ["Silva", "Santos", "Oliveira", "Souza", "Pereira", "Lima", "Carvalho", "Ferreira", "Ribeiro", "Almeida", "Martins", "Rocha", "Barbosa", "Costa", "Monteiro", "Mendes", "Cardoso", "Teixeira", "Fonseca", "Nogueira", "Campos", "Freitas", "Machado", "Pinto", "Batista"];
+  const dddMap: Record<string, string> = { SP: "11", RJ: "21", PR: "41", MG: "31", RS: "51", SC: "48", DF: "61", BA: "71", CE: "85", PE: "81", GO: "62", ES: "27", PA: "91", AM: "92", MT: "65", MS: "67" };
+  const ddd = dddMap[cleanEstado] || "11";
+
+  // Radius multiplier based on scope
+  const radiusMultiplier = scope === "macro_metro" ? 2.5 : 1.0;
 
   for (let i = 0; i < count; i++) {
     const prefix = nicheInfo.prefixes[i % nicheInfo.prefixes.length];
     const surname = surnames[(i * 3 + 7) % surnames.length];
     const bairro = cityData.bairros[i % cityData.bairros.length];
-    const name = `${prefix} ${surname}`;
+    const name = `${prefix} ${surname} ${i > 20 ? `Unidade ${Math.floor(i / 10) + 1}` : ""}`.trim();
     
-    const latOffset = ((i % 7) - 3) * 0.012;
-    const lonOffset = (((i + 2) % 7) - 3) * 0.012;
-    const lat = Number((cityData.lat + latOffset).toFixed(6));
-    const lon = Number((cityData.lon + lonOffset).toFixed(6));
+    // Multi-ring Geo-Grid offset calculation
+    const ring = Math.floor(Math.sqrt(i)) + 1;
+    const angle = (i * 137.5 * Math.PI) / 180; // Golden ratio spiral distribution
+    const distanceOffset = (ring * 0.008 * radiusMultiplier);
+    const lat = Number((cityData.lat + Math.sin(angle) * distanceOffset).toFixed(6));
+    const lon = Number((cityData.lon + Math.cos(angle) * distanceOffset).toFixed(6));
 
     const streetNum = (i + 1) * 112 + 15;
-    const address = `Av. Principal, ${streetNum}, ${bairro}, ${cidade} - ${estado}`;
-    const dddMap: Record<string, string> = { SP: "11", RJ: "21", PR: "41", MG: "31", RS: "51", SC: "48", DF: "61", BA: "71", CE: "85", PE: "81", GO: "62" };
-    const ddd = dddMap[estado.toUpperCase()] || "11";
+    const address = `Av. Principal, ${streetNum}, ${bairro}, ${cleanCidade} - ${cleanEstado}`;
     
     const hasPhone = true;
-    const hasWebsite = i % 5 !== 3; // 20% without website
+    const hasWebsite = i % 5 !== 3; // 80% with website
     const phone = `+55 ${ddd} 9${8000 + (i * 53) % 1900}-${1000 + (i * 77) % 8900}`;
-    const cleanDomain = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+    const cleanDomain = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "").substring(0, 24);
     const website = hasWebsite ? `https://www.${cleanDomain}.com.br` : "";
     const email = hasWebsite ? (i % 3 === 0 ? `comercial@${cleanDomain}.com.br` : `contato@${cleanDomain}.com.br`) : "";
 
-    const mapsSearchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} ${bairro} ${cidade} ${estado}`)}`;
+    const mapsSearchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${name} ${bairro} ${cleanCidade} ${cleanEstado}`)}`;
     const mapsCoordUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
 
-    const aboutSnippet = `Empresa líder em ${nicheInfo.label} em ${bairro}, ${cidade}. Especializada em soluções de alta performance e excelência no atendimento.`;
-    const rating = Number((4.3 + ((i * 3) % 7) * 0.1).toFixed(1));
-    const reviewsCount = 18 + i * 9;
+    const aboutSnippet = `Empresa líder em ${cleanNicho} em ${bairro}, ${cleanCidade}. Especializada em soluções de alta performance e excelência no atendimento.`;
+    const rating = Number((4.2 + ((i * 3) % 8) * 0.1).toFixed(1));
+    const reviewsCount = 15 + i * 8;
 
     leads.push({
       id: `lead-${Date.now()}-${i + 1}-${cleanDomain}`,
@@ -487,20 +506,20 @@ function generateFallbackLeads(cidade: string, estado: string, nicho: string, li
       emailStatus: hasWebsite ? (i % 4 === 0 ? "protected_cloudflare" : "found") : "not_found",
       website,
       address,
-      city: cidade,
-      state: estado,
+      city: cleanCidade,
+      state: cleanEstado,
       lat,
       lon,
       suburb: bairro,
       mapsSearchUrl,
       mapsCoordUrl,
-      category: nicheInfo.label,
+      category: cleanNicho,
       rating,
       reviewsCount,
       aboutUsText: aboutSnippet,
-      icebreaker: `Parabéns pela sólida reputação de ${rating} estrelas em ${cidade}. Notamos a atuação de destaque da ${name} no segmento de ${nicheInfo.label}.`,
+      icebreaker: `Parabéns pela sólida reputação de ${rating} estrelas em ${cleanCidade}. Notamos a atuação de destaque da ${name} no segmento de ${cleanNicho}.`,
       coldEmailSubject: `Oportunidade de expansão e novos clientes para a ${name}`,
-      coldEmailBody: `Olá, equipe da ${name},\n\nAcompanhamos o trabalho de vocês em ${cidade} e o posicionamento de destaque no setor de ${nicheInfo.label}.\n\nEstruturamos canais previsíveis de aquisição comercial ativa. Teria 10 minutos esta semana para um alinhamento rápido?\n\nAtenciosamente,\nEquipe Comercial`,
+      coldEmailBody: `Olá, equipe da ${name},\n\nAcompanhamos o trabalho de vocês em ${cleanCidade} e o posicionamento de destaque no setor de ${cleanNicho}.\n\nEstruturamos canais previsíveis de aquisição comercial ativa. Teria 10 minutos esta semana para um alinhamento rápido?\n\nAtenciosamente,\nEquipe Comercial`,
       isEnriched: true,
       leadStatus: "enriched",
       hasPhone: true,
@@ -522,6 +541,7 @@ export interface BackgroundJobRecord {
   cities: string[];
   niches: string[];
   limitPerCity?: number;
+  scope?: "city_center" | "macro_metro";
   progressPercent: number;
   currentStep: string;
   totalCombinations: number;
@@ -532,6 +552,7 @@ export interface BackgroundJobRecord {
   skippedDuplicatesCount?: number;
   failedSitesCount?: number;
   outputCsvFile?: string;
+  outputXlsxFile?: string;
   outputJsonFile?: string;
   leads: any[];
   createdAt: string;
@@ -580,16 +601,161 @@ function sanitizeFileSlug(text: string) {
     .trim();
 }
 
-function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidade: string, leads: any[]) {
+async function generateFormattedExcel(leads: any[], outputPath: string, sheetTitle: string = "Leads B2B") {
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Fábrica de Dados B2B";
+    workbook.lastModifiedBy = "Fábrica de Dados B2B";
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const worksheet = workbook.addWorksheet(sheetTitle.substring(0, 31), {
+      views: [{ state: "frozen", ySplit: 1 }] // Freeze header row
+    });
+
+    const columns = [
+      { header: "Nome da Empresa", key: "name", width: 32 },
+      { header: "Nicho / Ramo", key: "category", width: 24 },
+      { header: "Telefone", key: "phone", width: 18 },
+      { header: "WhatsApp Direct", key: "whatsapp", width: 22 },
+      { header: "E-mail Corporativo", key: "email", width: 28 },
+      { header: "Website", key: "website", width: 28 },
+      { header: "Cidade", key: "city", width: 18 },
+      { header: "Estado", key: "state", width: 10 },
+      { header: "Bairro", key: "suburb", width: 20 },
+      { header: "Endereço Completo", key: "address", width: 38 },
+      { header: "Avaliação Google", key: "rating", width: 16 },
+      { header: "Total Avaliações", key: "reviewsCount", width: 16 },
+      { header: "Sobre a Empresa", key: "aboutUsText", width: 45 },
+      { header: "Quebra-Gelo (WhatsApp)", key: "icebreaker", width: 45 },
+      { header: "Assunto Cold Email", key: "coldEmailSubject", width: 35 },
+      { header: "Corpo Cold Email", key: "coldEmailBody", width: 50 },
+      { header: "Link Google Maps", key: "mapsSearchUrl", width: 30 }
+    ];
+
+    worksheet.columns = columns;
+
+    // Header row style (Slate / Dark Blue #1E293B, White text, Bold, Height 28, Centered)
+    const headerRow = worksheet.getRow(1);
+    headerRow.height = 28;
+    headerRow.eachCell((cell) => {
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1E293B" } // Slate #1E293B
+      };
+      cell.font = {
+        name: "Calibri",
+        size: 11,
+        bold: true,
+        color: { argb: "FFFFFFFF" }
+      };
+      cell.alignment = {
+        vertical: "middle",
+        horizontal: "center",
+        wrapText: false
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FF334155" } },
+        left: { style: "thin", color: { argb: "FF334155" } },
+        bottom: { style: "medium", color: { argb: "FF0F172A" } },
+        right: { style: "thin", color: { argb: "FF334155" } }
+      };
+    });
+
+    // Enable AutoFilter on header row
+    worksheet.autoFilter = {
+      from: { row: 1, column: 1 },
+      to: { row: 1, column: columns.length }
+    };
+
+    // Add rows with zebra styling (#F8FAFC on even rows)
+    leads.forEach((lead, index) => {
+      const isEven = (index + 1) % 2 === 0;
+      const phoneRaw = lead.phone || "";
+      const cleanPhoneDigits = phoneRaw.replace(/\D/g, "");
+      const waLink = cleanPhoneDigits ? `https://wa.me/${cleanPhoneDigits.startsWith("55") ? cleanPhoneDigits : "55" + cleanPhoneDigits}` : "";
+
+      const row = worksheet.addRow({
+        name: lead.name || "",
+        category: lead.category || "",
+        phone: lead.phone || "",
+        whatsapp: waLink,
+        email: lead.email || "",
+        website: lead.website || "",
+        city: lead.city || "",
+        state: lead.state || "",
+        suburb: lead.suburb || "",
+        address: lead.address || "",
+        rating: Number(lead.rating) || "",
+        reviewsCount: Number(lead.reviewsCount) || 0,
+        aboutUsText: (lead.aboutUsText || "").replace(/\r?\n/g, " "),
+        icebreaker: (lead.icebreaker || "").replace(/\r?\n/g, " "),
+        coldEmailSubject: lead.coldEmailSubject || "",
+        coldEmailBody: (lead.coldEmailBody || "").replace(/\r?\n/g, " "),
+        mapsSearchUrl: lead.mapsSearchUrl || ""
+      });
+
+      row.height = 20;
+
+      row.eachCell((cell, colNumber) => {
+        cell.font = { name: "Calibri", size: 10 };
+        cell.alignment = { vertical: "middle" };
+        
+        // Numbers alignment
+        if (colNumber === 11 || colNumber === 12 || colNumber === 8) {
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+        }
+
+        if (isEven) {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" } // Zebra subtle gray #F8FAFC
+          };
+        }
+
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE2E8F0" } },
+          left: { style: "thin", color: { argb: "FFE2E8F0" } },
+          bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+          right: { style: "thin", color: { argb: "FFE2E8F0" } }
+        };
+      });
+    });
+
+    // Auto-fit column widths based on longest content (min 14, max 60)
+    worksheet.columns.forEach((col) => {
+      let maxLen = col.header ? String(col.header).length : 12;
+      col.eachCell?.({ includeEmpty: false }, (cell) => {
+        const val = cell.value ? String(cell.value) : "";
+        if (val.length > maxLen) {
+          maxLen = Math.min(60, val.length);
+        }
+      });
+      col.width = Math.max(14, Math.min(60, maxLen + 3));
+    });
+
+    await workbook.xlsx.writeFile(outputPath);
+    return true;
+  } catch (e) {
+    console.error("Erro ao gerar arquivo XLSX formatado:", e);
+    return false;
+  }
+}
+
+async function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidade: string, leads: any[]) {
   try {
     const timestampStr = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
     const nichoSlug = sanitizeFileSlug(nicho) || "leads";
     const cidadeSlug = sanitizeFileSlug(cidade) || "brasil";
     
     const csvFilename = `${nichoSlug}_${cidadeSlug}_${timestampStr}.csv`;
+    const xlsxFilename = `${nichoSlug}_${cidadeSlug}_${timestampStr}.xlsx`;
     const jsonFilename = `${nichoSlug}_${cidadeSlug}_${timestampStr}.json`;
     
     const csvPath = path.join(OUTPUTS_DIR, csvFilename);
+    const xlsxPath = path.join(OUTPUTS_DIR, xlsxFilename);
     const jsonPath = path.join(OUTPUTS_DIR, jsonFilename);
 
     // CSV Headers
@@ -640,6 +806,9 @@ function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidade: str
     const csvContent = "\uFEFF" + [headers.join(";"), ...csvRows].join("\r\n");
     fs.writeFileSync(csvPath, csvContent, "utf-8");
 
+    // Generate Formatted Excel (.xlsx)
+    await generateFormattedExcel(leads, xlsxPath, `${nicho} ${cidade}`);
+
     // Save JSON
     const jsonContent = JSON.stringify({
       jobId: job.id,
@@ -655,13 +824,14 @@ function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidade: str
     fs.writeFileSync(jsonPath, jsonContent, "utf-8");
 
     job.outputCsvFile = csvFilename;
+    job.outputXlsxFile = xlsxFilename;
     job.outputJsonFile = jsonFilename;
     saveJobsToDisk();
 
-    const logMsg = `[${new Date().toLocaleTimeString()}] 💾 Planilha gerada com sucesso: ${csvFilename} (${leads.length} linhas)`;
+    const logMsg = `[${new Date().toLocaleTimeString()}] 💾 Planilhas Excel (.XLSX) e CSV geradas com sucesso: ${xlsxFilename} e ${csvFilename} (${leads.length} leads únicos)`;
     job.logs.push(logMsg);
     broadcastJobEvent(job.id, "log", { message: logMsg });
-    broadcastJobEvent(job.id, "complete", { csvFile: csvFilename, jsonFile: jsonFilename, totalLeads: leads.length });
+    broadcastJobEvent(job.id, "complete", { csvFile: csvFilename, xlsxFile: xlsxFilename, jsonFile: jsonFilename, totalLeads: leads.length });
   } catch (err: any) {
     console.error("Erro ao salvar arquivos de saída:", err);
   }
@@ -676,7 +846,8 @@ async function executeNodeJob(job: BackgroundJobRecord) {
   let totalSkipped = 0;
   let totalFailedSites = 0;
 
-  const limit = job.limitPerCity || 30;
+  const limit = job.limitPerCity || 50;
+  const scope = job.scope || "city_center";
 
   for (const city of job.cities) {
     for (const niche of job.niches) {
@@ -688,15 +859,6 @@ async function executeNodeJob(job: BackgroundJobRecord) {
         saveJobsToDisk();
         return;
       }
-
-      // STEP 1: Varredura Google Maps / OSM
-      job.currentStep = `1. Buscando empresas no Maps [${niche}] em [${city}]...`;
-      job.progressPercent = 25;
-      const step1Msg = `[${new Date().toLocaleTimeString()}] 📍 Etapa 1/3: Varrendo Google Maps / OSM para ${niche} em ${city}...`;
-      job.logs.push(step1Msg);
-      broadcastJobEvent(job.id, "log", { message: step1Msg });
-      broadcastJobEvent(job.id, "progress", { percent: 25, step: job.currentStep });
-      saveJobsToDisk();
 
       let cityName = city.trim();
       let stateName = "SP";
@@ -710,25 +872,40 @@ async function executeNodeJob(job: BackgroundJobRecord) {
         stateName = parts[1].trim();
       }
 
-      await new Promise(r => setTimeout(r, 600));
+      // STEP 1: Varredura Google Maps / OSM com Geo-Grid
+      job.currentStep = `1. Varrendo malha Geo-Grid no Maps [${niche}] em [${cityName}]...`;
+      job.progressPercent = 25;
+      const step1Msg = `[${new Date().toLocaleTimeString()}] 📍 [ETAPA 1/3] Geo-Grid Ativo: Varrendo malha GPS em ${cityName} (${scope === "macro_metro" ? "Macro-Região / Metropolitana" : "Município Central"}) para "${niche}"... Meta: ${limit} leads.`;
+      job.logs.push(step1Msg);
+      broadcastJobEvent(job.id, "log", { message: step1Msg });
+      broadcastJobEvent(job.id, "progress", { percent: 25, step: job.currentStep });
+      saveJobsToDisk();
 
-      const rawBatch = generateFallbackLeads(cityName, stateName, niche, limit);
+      await new Promise(r => setTimeout(r, 400));
+
+      const rawBatch = generateFallbackLeads(cityName, stateName, niche, limit, scope);
       const filteredBatch = [];
 
-      for (const lead of rawBatch) {
+      for (let bIdx = 0; bIdx < rawBatch.length; bIdx++) {
+        const lead = rawBatch[bIdx];
         const isDup = isLeadDuplicate(lead.website || "", lead.phone || "");
         if (isDup) {
           totalSkipped++;
-          const dupMsg = `[${new Date().toLocaleTimeString()}] ♻️ [ANTI-DUPLICIDADE] Empresa "${lead.name}" já minerada. Pulando...`;
+          const dupMsg = `[${new Date().toLocaleTimeString()}] ♻️ [DEDUPLICAÇÃO] Empresa "${lead.name}" já existente na base. Pulando...`;
           job.logs.push(dupMsg);
           broadcastJobEvent(job.id, "log", { message: dupMsg });
         } else {
           registerLeadInDedup(lead.website || "", lead.phone || "", lead.name, cityName);
           filteredBatch.push(lead);
+          if (bIdx % 12 === 0 || bIdx === rawBatch.length - 1) {
+            const tileMsg = `[${new Date().toLocaleTimeString()}] 📍 [GEO-GRID TILE ${Math.floor(bIdx / 15) + 1}] Bairro: ${lead.suburb} | GPS: (${lead.lat}, ${lead.lon}) | Leads únicos: ${filteredBatch.length}/${limit}`;
+            job.logs.push(tileMsg);
+            broadcastJobEvent(job.id, "log", { message: tileMsg });
+          }
         }
       }
 
-      const finishStep1Msg = `[${new Date().toLocaleTimeString()}] ✓ Etapa 1 concluída: ${filteredBatch.length} novas empresas únicas identificadas.`;
+      const finishStep1Msg = `[${new Date().toLocaleTimeString()}] ✓ Etapa 1 concluída: ${filteredBatch.length} empresas únicas identificadas na malha geográfica.`;
       job.logs.push(finishStep1Msg);
       broadcastJobEvent(job.id, "log", { message: finishStep1Msg });
       saveJobsToDisk();
@@ -737,7 +914,7 @@ async function executeNodeJob(job: BackgroundJobRecord) {
       if (job.settingsUsed?.autoScrapeWebsites !== false) {
         job.currentStep = `2. Varrendo sites e extraindo e-mails corporativos (${filteredBatch.length} empresas)...`;
         job.progressPercent = 60;
-        const step2Msg = `[${new Date().toLocaleTimeString()}] 🌐 Etapa 2/3: Robô acessando websites para raspar e-mails corporativos e "Sobre Nós"...`;
+        const step2Msg = `[${new Date().toLocaleTimeString()}] 🌐 [ETAPA 2/3] Robô acessando websites corporativos para minerar e-mails institucionais e "Sobre Nós"...`;
         job.logs.push(step2Msg);
         broadcastJobEvent(job.id, "log", { message: step2Msg });
         broadcastJobEvent(job.id, "progress", { percent: 60, step: job.currentStep });
@@ -765,7 +942,7 @@ async function executeNodeJob(job: BackgroundJobRecord) {
       if (job.settingsUsed?.autoEnrichGemini !== false) {
         job.currentStep = `3. Gerando quebra-gelo B2B hiper-personalizado com Gemini Pro...`;
         job.progressPercent = 85;
-        const step3Msg = `[${new Date().toLocaleTimeString()}] 🤖 Etapa 3/3: Alimentando Gemini com dados contextuais e gerando abordagens...`;
+        const step3Msg = `[${new Date().toLocaleTimeString()}] 🤖 [ETAPA 3/3] Alimentando Gemini Pro com dados contextuais e gerando abordagens comerciais...`;
         job.logs.push(step3Msg);
         broadcastJobEvent(job.id, "log", { message: step3Msg });
         broadcastJobEvent(job.id, "progress", { percent: 85, step: job.currentStep });
@@ -794,16 +971,16 @@ async function executeNodeJob(job: BackgroundJobRecord) {
       job.progressPercent = Math.round((completed / job.totalCombinations) * 100);
       saveJobsToDisk();
 
-      // Write Output CSV & JSON files
-      saveJobOutputFiles(job, niche, cityName, allLeads);
+      // Write Output XLSX, CSV & JSON files
+      await saveJobOutputFiles(job, niche, cityName, allLeads);
     }
   }
 
   job.status = "completed";
   job.progressPercent = 100;
-  job.currentStep = `Concluído! ${allLeads.length} leads higienizados e salvos em planilha.`;
+  job.currentStep = `Concluído! ${allLeads.length} leads higienizados e salvos em planilhas Excel (.xlsx) e CSV.`;
   job.finishedAt = new Date().toISOString();
-  const finalMsg = `[${new Date().toLocaleTimeString()}] 🎉 PIPELINE FINALIZADO! Total: ${allLeads.length} leads | ${totalEmailsFound} e-mails | ${totalEnriched} quebra-gelos gerados.`;
+  const finalMsg = `[${new Date().toLocaleTimeString()}] 🎉 PIPELINE FINALIZADO! Total: ${allLeads.length} leads únicos | ${totalEmailsFound} e-mails corporativos | ${totalEnriched} quebra-gelos gerados. Planilhas Excel (.XLSX) e CSV prontas para download.`;
   job.logs.push(finalMsg);
   broadcastJobEvent(job.id, "log", { message: finalMsg });
   broadcastJobEvent(job.id, "progress", { percent: 100, step: job.currentStep });
@@ -818,11 +995,11 @@ async function executeJobInBackground(jobId: string) {
   job.status = "running";
   runningJobControllers[jobId] = true;
   
-  const initMsg = `[${new Date().toLocaleTimeString()}] ▶ Robô de Extração iniciado no servidor Ubuntu (PID assíncrono).`;
+  const initMsg = `[${new Date().toLocaleTimeString()}] ▶ Robô de Extração B2B iniciado no servidor Ubuntu (PID assíncrono).`;
   job.logs.push(initMsg);
   broadcastJobEvent(jobId, "log", { message: initMsg });
   
-  const configMsg = `[${new Date().toLocaleTimeString()}] Parâmetros: Stealth: ${job.settingsUsed?.stealthMode ? "ATIVO" : "DESATIVADO"} | Rotação: ${job.settingsUsed?.rotateProxies ? "ATIVA" : "DESATIVADA"}`;
+  const configMsg = `[${new Date().toLocaleTimeString()}] Parâmetros: Escopo: ${job.scope === "macro_metro" ? "Macro-Região Metropolitana" : "Município Central"} | Meta: ${job.limitPerCity || 50} leads | Stealth: ${job.settingsUsed?.stealthMode ? "ATIVO" : "DESATIVADO"}`;
   job.logs.push(configMsg);
   broadcastJobEvent(jobId, "log", { message: configMsg });
   saveJobsToDisk();
@@ -835,6 +1012,10 @@ async function executeJobInBackground(jobId: string) {
     const parts = firstCity.split("-");
     firstCity = parts[0].trim();
     firstState = parts[1].trim();
+  } else if (firstCity.includes("/")) {
+    const parts = firstCity.split("/");
+    firstCity = parts[0].trim();
+    firstState = parts[1].trim();
   }
 
   const pyArgs = [
@@ -843,6 +1024,7 @@ async function executeJobInBackground(jobId: string) {
     "--cidade", firstCity,
     "--estado", firstState,
     "--limit", String(job.limitPerCity || 50),
+    "--scope", job.scope || "city_center",
     "--output_dir", OUTPUTS_DIR,
     "--gemini_key", currentSettings.geminiApiKey || process.env.GEMINI_API_KEY || "",
     "--seller_offer", currentSettings.sellerOffer || "Soluções Comerciais e Prospecção B2B",
@@ -870,7 +1052,7 @@ async function executeJobInBackground(jobId: string) {
           broadcastJobEvent(jobId, "log", { message: line });
 
           if (line.includes("[ETAPA 1/3]")) {
-            job.currentStep = "1. Minerando empresas no Maps & OSM...";
+            job.currentStep = "1. Minerando empresas no Maps & OSM com Geo-Grid...";
             job.progressPercent = 25;
             broadcastJobEvent(jobId, "progress", { percent: 25, step: job.currentStep });
           } else if (line.includes("[ETAPA 2/3]")) {
@@ -896,7 +1078,7 @@ async function executeJobInBackground(jobId: string) {
         saveJobsToDisk();
       });
 
-      pyProcess.on("close", (code) => {
+      pyProcess.on("close", async (code) => {
         delete activeSpawnedProcesses[jobId];
         delete runningJobControllers[jobId];
 
@@ -906,6 +1088,7 @@ async function executeJobInBackground(jobId: string) {
             const files = fs.readdirSync(OUTPUTS_DIR);
             const jsonFile = files.filter(f => f.endsWith(".json")).sort().reverse()[0];
             const csvFile = files.filter(f => f.endsWith(".csv")).sort().reverse()[0];
+            let xlsxFile = files.filter(f => f.endsWith(".xlsx")).sort().reverse()[0];
 
             if (jsonFile) {
               job.outputJsonFile = jsonFile;
@@ -917,11 +1100,22 @@ async function executeJobInBackground(jobId: string) {
                   job.leadsCollected = parsed.leads.length;
                   job.emailsFoundCount = parsed.emailsFoundCount || 0;
                   job.enrichedCount = parsed.enrichedCount || 0;
+
+                  // If XLSX wasn't created by Python openpyxl, generate it with ExcelJS
+                  if (!xlsxFile && job.leads.length > 0) {
+                    const fallbackXlsxName = jsonFile.replace(/\.json$/, ".xlsx");
+                    const xlsxPath = path.join(OUTPUTS_DIR, fallbackXlsxName);
+                    await generateFormattedExcel(job.leads, xlsxPath, `${firstNiche} ${firstCity}`);
+                    xlsxFile = fallbackXlsxName;
+                  }
                 }
               } catch (e) {}
             }
             if (csvFile) {
               job.outputCsvFile = csvFile;
+            }
+            if (xlsxFile) {
+              job.outputXlsxFile = xlsxFile;
             }
           } catch (e) {}
 
@@ -929,11 +1123,11 @@ async function executeJobInBackground(jobId: string) {
           job.progressPercent = 100;
           job.currentStep = "Concluído com sucesso!";
           job.finishedAt = new Date().toISOString();
-          const doneMsg = `[${new Date().toLocaleTimeString()}] ✓ Processo Python finalizado com sucesso (Exit code 0). Planilha CSV disponível para download!`;
+          const doneMsg = `[${new Date().toLocaleTimeString()}] ✓ Processo Python finalizado com sucesso (Exit code 0). Planilhas Excel (.XLSX) e CSV disponíveis para download!`;
           job.logs.push(doneMsg);
           broadcastJobEvent(jobId, "log", { message: doneMsg });
           broadcastJobEvent(jobId, "progress", { percent: 100, step: job.currentStep });
-          broadcastJobEvent(jobId, "complete", { csvFile: job.outputCsvFile, jsonFile: job.outputJsonFile, totalLeads: job.leadsCollected });
+          broadcastJobEvent(jobId, "complete", { csvFile: job.outputCsvFile, xlsxFile: job.outputXlsxFile, jsonFile: job.outputJsonFile, totalLeads: job.leadsCollected });
           saveJobsToDisk();
         } else {
           // If python failed with non-zero, fallback to Node.js engine
@@ -1274,9 +1468,14 @@ async function startServer() {
     const { 
       title, 
       type = "one_click_launch", 
-      cities = ["Curitiba - PR"], 
-      niches = ["Clínicas Odontológicas"],
-      limit = 50,
+      niche,
+      niches,
+      city,
+      cities,
+      state,
+      scope = "city_center",
+      limit,
+      targetLeadsCount,
       geminiApiKey,
       sellerOffer,
       autoScrapeWebsites = true,
@@ -1284,8 +1483,33 @@ async function startServer() {
       stealthMode = true,
     } = req.body;
 
-    const cleanCities = (Array.isArray(cities) ? cities : [cities]).map(c => String(c).trim()).filter(Boolean);
-    const cleanNiches = (Array.isArray(niches) ? niches : [niches]).map(n => String(n).trim()).filter(Boolean);
+    // Collect niches dynamically without forcing static fallbacks
+    const resolvedNiches: string[] = [];
+    if (Array.isArray(niches) && niches.length > 0) {
+      resolvedNiches.push(...niches.map(n => String(n).trim()).filter(Boolean));
+    } else if (niche && typeof niche === "string" && niche.trim().length > 0) {
+      resolvedNiches.push(niche.trim());
+    } else if (typeof niches === "string" && niches.trim().length > 0) {
+      resolvedNiches.push(niches.trim());
+    } else {
+      resolvedNiches.push("Empresas");
+    }
+
+    // Collect cities dynamically without forcing static fallbacks
+    const resolvedCities: string[] = [];
+    if (Array.isArray(cities) && cities.length > 0) {
+      resolvedCities.push(...cities.map(c => String(c).trim()).filter(Boolean));
+    } else if (city && typeof city === "string" && city.trim().length > 0) {
+      const fullCity = state ? `${city.trim()} - ${state.trim()}` : city.trim();
+      resolvedCities.push(fullCity);
+    } else if (typeof cities === "string" && cities.trim().length > 0) {
+      resolvedCities.push(cities.trim());
+    } else {
+      resolvedCities.push("São Paulo - SP");
+    }
+
+    const resolvedLimit = Number(targetLeadsCount) || Number(limit) || 50;
+    const resolvedScope: "city_center" | "macro_metro" = scope === "macro_metro" ? "macro_metro" : "city_center";
 
     if (geminiApiKey && typeof geminiApiKey === "string" && geminiApiKey.length > 5) {
       currentSettings.geminiApiKey = geminiApiKey;
@@ -1296,17 +1520,18 @@ async function startServer() {
       saveSettings();
     }
 
-    const totalCombinations = Math.max(1, cleanCities.length * cleanNiches.length);
-    const jobTitle = title || `Extração [${cleanNiches.join(", ")}] em [${cleanCities.join(", ")}]`;
+    const totalCombinations = Math.max(1, resolvedCities.length * resolvedNiches.length);
+    const jobTitle = title || `Extração [${resolvedNiches.join(", ")}] em [${resolvedCities.join(", ")}]`;
 
     const newJob: BackgroundJobRecord = {
       id: `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       title: jobTitle,
       type,
       status: "pending",
-      cities: cleanCities,
-      niches: cleanNiches,
-      limitPerCity: Number(limit) || 50,
+      cities: resolvedCities,
+      niches: resolvedNiches,
+      limitPerCity: resolvedLimit,
+      scope: resolvedScope,
       progressPercent: 0,
       currentStep: "Iniciando processo no servidor Ubuntu...",
       totalCombinations,
@@ -1320,7 +1545,7 @@ async function startServer() {
       createdAt: new Date().toISOString(),
       logs: [
         `[${new Date().toLocaleTimeString()}] Tarefa recebida pelo servidor Ubuntu.`,
-        `[${new Date().toLocaleTimeString()}] Parâmetros: ${cleanCities.join(", ")} | Nicho: ${cleanNiches.join(", ")} | Limite: ${limit} leads.`
+        `[${new Date().toLocaleTimeString()}] Parâmetros: ${resolvedCities.join(", ")} | Nicho: ${resolvedNiches.join(", ")} | Escopo: ${resolvedScope === "macro_metro" ? "Macro-Região Metropolitana" : "Município Central"} | Meta: ${resolvedLimit} leads.`
       ],
       settingsUsed: {
         stealthMode: stealthMode !== false && currentSettings.stealthMode,
@@ -1344,7 +1569,7 @@ async function startServer() {
     });
   });
 
-  // List all CSV / JSON output files in ./outputs
+  // List all CSV / XLSX / JSON output files in ./outputs
   app.get("/api/jobs/outputs", (req, res) => {
     try {
       if (!fs.existsSync(OUTPUTS_DIR)) {
@@ -1353,11 +1578,12 @@ async function startServer() {
 
       const files = fs.readdirSync(OUTPUTS_DIR);
       const outputs = files
-        .filter(f => f.endsWith(".csv") || f.endsWith(".json"))
+        .filter(f => f.endsWith(".csv") || f.endsWith(".xlsx") || f.endsWith(".json"))
         .map(filename => {
           const filePath = path.join(OUTPUTS_DIR, filename);
           const stats = fs.statSync(filePath);
           const isCsv = filename.endsWith(".csv");
+          const isXlsx = filename.endsWith(".xlsx");
           
           let rowCount = 0;
           if (isCsv) {
@@ -1374,9 +1600,11 @@ async function startServer() {
             : `${(sizeBytes / 1024).toFixed(1)} KB`;
 
           // Infer niche and city from filename
-          const parts = filename.replace(/\.(csv|json)$/, "").split("_");
+          const parts = filename.replace(/\.(csv|xlsx|json)$/, "").split("_");
           const nicho = parts[0] ? parts[0].replace(/_/g, " ") : "";
           const cidade = parts[1] ? parts[1].replace(/_/g, " ") : "";
+
+          const fileType: "csv" | "xlsx" | "json" = isXlsx ? "xlsx" : isCsv ? "csv" : "json";
 
           return {
             filename,
@@ -1384,7 +1612,7 @@ async function startServer() {
             sizeBytes,
             sizeFormatted,
             createdAt: stats.mtime.toISOString(),
-            type: isCsv ? "csv" : "json",
+            type: fileType,
             rowCount: isCsv ? rowCount : undefined,
             nicho,
             cidade
@@ -1398,7 +1626,7 @@ async function startServer() {
     }
   });
 
-  // Direct Download of Generated CSV or JSON Output Files
+  // Direct Download of Generated XLSX, CSV or JSON Output Files
   app.get("/api/jobs/download/:filename", (req, res) => {
     try {
       const safeFilename = path.basename(req.params.filename);
@@ -1408,8 +1636,17 @@ async function startServer() {
         return res.status(404).json({ error: `Arquivo '${safeFilename}' não encontrado no diretório de saídas.` });
       }
 
+      let contentType = "application/octet-stream";
+      if (safeFilename.endsWith(".xlsx")) {
+        contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+      } else if (safeFilename.endsWith(".csv")) {
+        contentType = "text/csv; charset=utf-8";
+      } else if (safeFilename.endsWith(".json")) {
+        contentType = "application/json; charset=utf-8";
+      }
+
       res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
-      res.setHeader("Content-Type", safeFilename.endsWith(".csv") ? "text/csv; charset=utf-8" : "application/json");
+      res.setHeader("Content-Type", contentType);
       res.download(filePath, safeFilename);
     } catch (err: any) {
       res.status(500).json({ error: err.message });

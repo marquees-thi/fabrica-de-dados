@@ -55,7 +55,9 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
   const [sendingWebhook, setSendingWebhook] = useState(false);
   const [webhookMessage, setWebhookMessage] = useState<string | null>(null);
 
-  // Logs terminal ref for auto-scroll
+  // Smart Logs Terminal Auto-scroll
+  const [autoScroll, setAutoScroll] = useState(true);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -179,10 +181,21 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
   }, []);
 
   useEffect(() => {
-    if (terminalEndRef.current) {
+    if (autoScroll && terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [selectedJob?.logs]);
+  }, [selectedJob?.logs, autoScroll]);
+
+  const handleLogsScroll = () => {
+    if (!logsContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = logsContainerRef.current;
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 40;
+    if (!isAtBottom && autoScroll) {
+      setAutoScroll(false);
+    } else if (isAtBottom && !autoScroll) {
+      setAutoScroll(true);
+    }
+  };
 
   // Delete single lead
   const handleDeleteLead = async (leadId: string) => {
@@ -237,6 +250,19 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
     } catch (err) {
       alert("Erro ao excluir arquivo.");
     }
+  };
+
+  // Export to formatted Excel (.xlsx)
+  const handleExportXLSX = (job: BackgroundJob) => {
+    if (job.outputXlsxFile) {
+      window.location.href = `/api/jobs/download/${encodeURIComponent(job.outputXlsxFile)}`;
+      return;
+    }
+    if (job.outputCsvFile) {
+      window.location.href = `/api/jobs/download/${encodeURIComponent(job.outputCsvFile)}`;
+      return;
+    }
+    handleExportCSV(job);
   };
 
   // Export to CSV with UTF-8 BOM
@@ -524,7 +550,9 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                     <tr key={out.filename} className="hover:bg-[#1C1F26]/60 transition-colors">
                       <td className="py-3 px-3">
                         <div className="font-bold text-[#E4E7EB] flex items-center gap-2">
-                          {out.type === "csv" ? (
+                          {out.type === "xlsx" ? (
+                            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                          ) : out.type === "csv" ? (
                             <FileSpreadsheet className="w-4 h-4 text-[#00FF9C]" />
                           ) : (
                             <FileJson className="w-4 h-4 text-[#38BDF8]" />
@@ -534,7 +562,9 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                       </td>
                       <td className="py-3 px-3">
                         <span className={`px-2 py-0.5 text-[10px] font-bold uppercase border ${
-                          out.type === "csv"
+                          out.type === "xlsx"
+                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                            : out.type === "csv"
                             ? "bg-[#00FF9C]/10 text-[#00FF9C] border-[#00FF9C]/30"
                             : "bg-[#38BDF8]/10 text-[#38BDF8] border-[#38BDF8]/30"
                         }`}>
@@ -557,7 +587,11 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                         <div className="flex items-center justify-end gap-2">
                           <a
                             href={`/api/jobs/download/${encodeURIComponent(out.filename)}`}
-                            className="px-2.5 py-1 bg-[#00FF9C] text-[#0A0B0E] font-bold text-xs hover:bg-[#00FF9C]/90 transition-all flex items-center gap-1 shadow-[0_0_8px_rgba(0,255,156,0.2)]"
+                            className={`px-2.5 py-1 font-bold text-xs transition-all flex items-center gap-1 ${
+                              out.type === "xlsx"
+                                ? "bg-emerald-500 hover:bg-emerald-400 text-[#0A0B0E] shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+                                : "bg-[#00FF9C] text-[#0A0B0E] hover:bg-[#00FF9C]/90 shadow-[0_0_8px_rgba(0,255,156,0.2)]"
+                            }`}
                             download
                           >
                             <Download className="w-3 h-3" />
@@ -664,7 +698,19 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                             <span>✨ {job.enrichedCount || 0} IA</span>
                           </div>
 
-                          {job.outputCsvFile && (
+                          {job.outputXlsxFile ? (
+                            <div className="pt-1 flex items-center gap-2">
+                              <a
+                                href={`/api/jobs/download/${encodeURIComponent(job.outputXlsxFile)}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-[10px] text-emerald-400 hover:underline font-bold"
+                                download
+                              >
+                                <Download className="w-3 h-3" />
+                                <span>Baixar {job.outputXlsxFile}</span>
+                              </a>
+                            </div>
+                          ) : job.outputCsvFile ? (
                             <div className="pt-1">
                               <a
                                 href={`/api/jobs/download/${encodeURIComponent(job.outputCsvFile)}`}
@@ -676,7 +722,7 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                                 <span>Baixar {job.outputCsvFile}</span>
                               </a>
                             </div>
-                          )}
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -704,14 +750,22 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                       </div>
                     </div>
 
-                    {/* Actions: Export CSV, JSON, Webhook */}
+                    {/* Actions: Export XLSX, CSV, JSON, Webhook */}
                     <div className="flex flex-wrap items-center gap-2">
                       <button
-                        onClick={() => handleExportCSV(selectedJob)}
-                        className="px-3 py-1.5 bg-[#00FF9C] text-[#0A0B0E] font-mono font-bold text-xs hover:bg-[#00FF9C]/90 transition-all flex items-center gap-1.5 shadow-[0_0_10px_rgba(0,255,156,0.2)]"
+                        onClick={() => handleExportXLSX(selectedJob)}
+                        className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-[#0A0B0E] font-mono font-bold text-xs transition-all flex items-center gap-1.5 shadow-[0_0_10px_rgba(16,185,129,0.3)]"
                       >
                         <FileSpreadsheet className="w-3.5 h-3.5" />
-                        <span>{selectedJob.outputCsvFile ? "BAIXAR PLANILHA CSV" : "EXPORTAR CSV"}</span>
+                        <span>{selectedJob.outputXlsxFile ? "BAIXAR EXCEL (.XLSX)" : "GERAR EXCEL (.XLSX)"}</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleExportCSV(selectedJob)}
+                        className="px-2.5 py-1.5 bg-[#00FF9C]/20 border border-[#00FF9C]/40 text-[#00FF9C] hover:bg-[#00FF9C]/30 font-mono font-bold text-xs transition-all flex items-center gap-1.5"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" />
+                        <span>{selectedJob.outputCsvFile ? "CSV (UTF-8)" : "CSV"}</span>
                       </button>
 
                       <button
@@ -740,17 +794,34 @@ export const BackgroundJobsManager: React.FC<BackgroundJobsManagerProps> = ({ on
                     </div>
                   )}
 
-                  {/* Terminal Virtual Minimalista com Logs SSE */}
+                  {/* Terminal Virtual Minimalista com Logs SSE e Smart Auto-Scroll */}
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-[11px] font-mono text-[#717681]">
                       <span className="flex items-center gap-1.5">
                         <Terminal className="w-3.5 h-3.5 text-[#00FF9C]" />
                         <span>TERMINAL VIRTUAL // STREAMING EM TEMPO REAL (SSE)</span>
                       </span>
-                      <span>{selectedJob.logs.length} eventos registrados</span>
+                      <div className="flex items-center gap-3">
+                        <span>{selectedJob.logs.length} eventos</span>
+                        <button
+                          type="button"
+                          onClick={() => setAutoScroll(!autoScroll)}
+                          className={`text-[10px] px-2 py-0.5 border font-bold transition-all ${
+                            autoScroll
+                              ? "bg-[#00FF9C]/20 border-[#00FF9C] text-[#00FF9C]"
+                              : "bg-[#1C1F26] border-[#22262E] text-[#717681] hover:text-[#E4E7EB]"
+                          }`}
+                        >
+                          Auto-scroll: {autoScroll ? "LIGADO" : "PAUSADO"}
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="bg-[#0A0B0E] border border-[#22262E] p-3 rounded-none font-mono text-xs text-[#A0A6B1] h-36 overflow-y-auto space-y-1">
+                    <div
+                      ref={logsContainerRef}
+                      onScroll={handleLogsScroll}
+                      className="bg-[#0A0B0E] border border-[#22262E] p-3 rounded-none font-mono text-xs text-[#A0A6B1] h-36 overflow-y-auto space-y-1"
+                    >
                       {selectedJob.logs.map((log, idx) => {
                         const isSuccess = log.includes("✓") || log.includes("🎉") || log.includes("concluído");
                         const isWarning = log.includes("♻️") || log.includes("🛡️") || log.includes("PULADO") || log.includes("⚠️");

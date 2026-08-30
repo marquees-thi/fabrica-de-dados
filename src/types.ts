@@ -49,6 +49,7 @@ export interface BackgroundJob {
   cities: string[];
   niches: string[];
   limitPerCity?: number;
+  scope?: "city_center" | "macro_metro";
   progressPercent: number;
   currentStep: string;
   totalCombinations: number;
@@ -59,6 +60,7 @@ export interface BackgroundJob {
   skippedDuplicatesCount?: number;
   failedSitesCount?: number;
   outputCsvFile?: string;
+  outputXlsxFile?: string;
   outputJsonFile?: string;
   leads: CompanyLead[];
   createdAt: string;
@@ -78,7 +80,7 @@ export interface OutputFile {
   sizeBytes: number;
   sizeFormatted: string;
   createdAt: string;
-  type: "csv" | "json";
+  type: "csv" | "json" | "xlsx";
   rowCount?: number;
   nicho?: string;
   cidade?: string;
