@@ -58,6 +58,8 @@ export interface BackgroundJob {
   enrichedCount?: number;
   skippedDuplicatesCount?: number;
   failedSitesCount?: number;
+  outputCsvFile?: string;
+  outputJsonFile?: string;
   leads: CompanyLead[];
   createdAt: string;
   finishedAt?: string;
@@ -68,6 +70,18 @@ export interface BackgroundJob {
     autoEnrichGemini: boolean;
     autoScrapeWebsites: boolean;
   };
+}
+
+export interface OutputFile {
+  filename: string;
+  filePath: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  createdAt: string;
+  type: "csv" | "json";
+  rowCount?: number;
+  nicho?: string;
+  cidade?: string;
 }
 
 export interface SystemSettings {

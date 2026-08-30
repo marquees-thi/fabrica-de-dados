@@ -2,6 +2,8 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { spawn, ChildProcess } from "child_process";
+import { EventEmitter } from "events";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 
@@ -10,7 +12,7 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure data persistence directory exists
+// Ensure data and outputs directories exist
 const DATA_DIR = path.join(process.cwd(), "data");
 if (!fs.existsSync(DATA_DIR)) {
   try {
@@ -20,9 +22,32 @@ if (!fs.existsSync(DATA_DIR)) {
   }
 }
 
+const OUTPUTS_DIR = path.join(process.cwd(), "outputs");
+if (!fs.existsSync(OUTPUTS_DIR)) {
+  try {
+    fs.mkdirSync(OUTPUTS_DIR, { recursive: true });
+  } catch (e) {
+    console.error("Erro ao criar pasta /outputs:", e);
+  }
+}
+
 const JOBS_FILE = path.join(DATA_DIR, "jobs_store.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "system_settings.json");
 const DEDUP_FILE = path.join(DATA_DIR, "dedup_store.json");
+
+// Job Event Emitter for SSE Live Streaming
+const jobEvents = new EventEmitter();
+jobEvents.setMaxListeners(150);
+
+function broadcastJobEvent(jobId: string, event: "log" | "progress" | "complete" | "error", data: any) {
+  const payload = {
+    jobId,
+    event,
+    data,
+    timestamp: new Date().toISOString(),
+  };
+  jobEvents.emit(`job:${jobId}`, payload);
+}
 
 // System Settings State & Persistence
 interface SystemSettingsData {
@@ -506,6 +531,8 @@ export interface BackgroundJobRecord {
   enrichedCount?: number;
   skippedDuplicatesCount?: number;
   failedSitesCount?: number;
+  outputCsvFile?: string;
+  outputJsonFile?: string;
   leads: any[];
   createdAt: string;
   finishedAt?: string;
@@ -519,6 +546,8 @@ export interface BackgroundJobRecord {
 }
 
 let backgroundJobs: BackgroundJobRecord[] = [];
+const runningJobControllers: Record<string, boolean> = {};
+const activeSpawnedProcesses: Record<string, ChildProcess> = {};
 
 function loadJobsFromDisk() {
   try {
@@ -541,148 +570,396 @@ function saveJobsToDisk() {
 
 loadJobsFromDisk();
 
-const runningJobControllers: Record<string, boolean> = {};
+function sanitizeFileSlug(text: string) {
+  return (text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .trim();
+}
 
-// Automated Non-Blocking Full Pipeline Worker
+function saveJobOutputFiles(job: BackgroundJobRecord, nicho: string, cidade: string, leads: any[]) {
+  try {
+    const timestampStr = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 15);
+    const nichoSlug = sanitizeFileSlug(nicho) || "leads";
+    const cidadeSlug = sanitizeFileSlug(cidade) || "brasil";
+    
+    const csvFilename = `${nichoSlug}_${cidadeSlug}_${timestampStr}.csv`;
+    const jsonFilename = `${nichoSlug}_${cidadeSlug}_${timestampStr}.json`;
+    
+    const csvPath = path.join(OUTPUTS_DIR, csvFilename);
+    const jsonPath = path.join(OUTPUTS_DIR, jsonFilename);
+
+    // CSV Headers
+    const headers = [
+      "Nome da Empresa",
+      "Nicho",
+      "Telefone",
+      "E-mail Corporativo",
+      "Website",
+      "Cidade",
+      "Estado",
+      "Bairro",
+      "Endereco Completo",
+      "Avaliacao Google",
+      "Qtd Avaliacoes",
+      "Sobre Nos",
+      "Quebra Gelo (WhatsApp)",
+      "Assunto Cold Email",
+      "Corpo Cold Email",
+      "Link Google Maps"
+    ];
+
+    const escapeCsv = (str: any) => {
+      const val = String(str || "").replace(/"/g, '""').replace(/\r?\n/g, " ");
+      return `"${val}"`;
+    };
+
+    const csvRows = leads.map(lead => [
+      escapeCsv(lead.name),
+      escapeCsv(lead.category),
+      escapeCsv(lead.phone),
+      escapeCsv(lead.email),
+      escapeCsv(lead.website),
+      escapeCsv(lead.city),
+      escapeCsv(lead.state),
+      escapeCsv(lead.suburb),
+      escapeCsv(lead.address),
+      escapeCsv(lead.rating),
+      escapeCsv(lead.reviewsCount || 0),
+      escapeCsv(lead.aboutUsText),
+      escapeCsv(lead.icebreaker),
+      escapeCsv(lead.coldEmailSubject),
+      escapeCsv(lead.coldEmailBody),
+      escapeCsv(lead.mapsSearchUrl)
+    ].join(";"));
+
+    // \uFEFF for UTF-8 with BOM (opens perfectly in Microsoft Excel & Calc)
+    const csvContent = "\uFEFF" + [headers.join(";"), ...csvRows].join("\r\n");
+    fs.writeFileSync(csvPath, csvContent, "utf-8");
+
+    // Save JSON
+    const jsonContent = JSON.stringify({
+      jobId: job.id,
+      title: job.title,
+      nicho,
+      cidade,
+      totalLeads: leads.length,
+      emailsFoundCount: job.emailsFoundCount || 0,
+      enrichedCount: job.enrichedCount || 0,
+      generatedAt: new Date().toISOString(),
+      leads
+    }, null, 2);
+    fs.writeFileSync(jsonPath, jsonContent, "utf-8");
+
+    job.outputCsvFile = csvFilename;
+    job.outputJsonFile = jsonFilename;
+    saveJobsToDisk();
+
+    const logMsg = `[${new Date().toLocaleTimeString()}] 💾 Planilha gerada com sucesso: ${csvFilename} (${leads.length} linhas)`;
+    job.logs.push(logMsg);
+    broadcastJobEvent(job.id, "log", { message: logMsg });
+    broadcastJobEvent(job.id, "complete", { csvFile: csvFilename, jsonFile: jsonFilename, totalLeads: leads.length });
+  } catch (err: any) {
+    console.error("Erro ao salvar arquivos de saída:", err);
+  }
+}
+
+// Fallback Node.js Worker in case Python is not available in environment
+async function executeNodeJob(job: BackgroundJobRecord) {
+  const allLeads: any[] = [];
+  let completed = 0;
+  let totalEmailsFound = 0;
+  let totalEnriched = 0;
+  let totalSkipped = 0;
+  let totalFailedSites = 0;
+
+  const limit = job.limitPerCity || 30;
+
+  for (const city of job.cities) {
+    for (const niche of job.niches) {
+      if (!runningJobControllers[job.id]) {
+        job.status = "cancelled";
+        const cancelMsg = `[${new Date().toLocaleTimeString()}] ⏹ Tarefa interrompida pelo usuário.`;
+        job.logs.push(cancelMsg);
+        broadcastJobEvent(job.id, "log", { message: cancelMsg });
+        saveJobsToDisk();
+        return;
+      }
+
+      // STEP 1: Varredura Google Maps / OSM
+      job.currentStep = `1. Buscando empresas no Maps [${niche}] em [${city}]...`;
+      job.progressPercent = 25;
+      const step1Msg = `[${new Date().toLocaleTimeString()}] 📍 Etapa 1/3: Varrendo Google Maps / OSM para ${niche} em ${city}...`;
+      job.logs.push(step1Msg);
+      broadcastJobEvent(job.id, "log", { message: step1Msg });
+      broadcastJobEvent(job.id, "progress", { percent: 25, step: job.currentStep });
+      saveJobsToDisk();
+
+      let cityName = city.trim();
+      let stateName = "SP";
+      if (cityName.includes("-")) {
+        const parts = cityName.split("-");
+        cityName = parts[0].trim();
+        stateName = parts[1].trim();
+      } else if (cityName.includes("/")) {
+        const parts = cityName.split("/");
+        cityName = parts[0].trim();
+        stateName = parts[1].trim();
+      }
+
+      await new Promise(r => setTimeout(r, 600));
+
+      const rawBatch = generateFallbackLeads(cityName, stateName, niche, limit);
+      const filteredBatch = [];
+
+      for (const lead of rawBatch) {
+        const isDup = isLeadDuplicate(lead.website || "", lead.phone || "");
+        if (isDup) {
+          totalSkipped++;
+          const dupMsg = `[${new Date().toLocaleTimeString()}] ♻️ [ANTI-DUPLICIDADE] Empresa "${lead.name}" já minerada. Pulando...`;
+          job.logs.push(dupMsg);
+          broadcastJobEvent(job.id, "log", { message: dupMsg });
+        } else {
+          registerLeadInDedup(lead.website || "", lead.phone || "", lead.name, cityName);
+          filteredBatch.push(lead);
+        }
+      }
+
+      const finishStep1Msg = `[${new Date().toLocaleTimeString()}] ✓ Etapa 1 concluída: ${filteredBatch.length} novas empresas únicas identificadas.`;
+      job.logs.push(finishStep1Msg);
+      broadcastJobEvent(job.id, "log", { message: finishStep1Msg });
+      saveJobsToDisk();
+
+      // STEP 2: Varredura de Websites & E-mails
+      if (job.settingsUsed?.autoScrapeWebsites !== false) {
+        job.currentStep = `2. Varrendo sites e extraindo e-mails corporativos (${filteredBatch.length} empresas)...`;
+        job.progressPercent = 60;
+        const step2Msg = `[${new Date().toLocaleTimeString()}] 🌐 Etapa 2/3: Robô acessando websites para raspar e-mails corporativos e "Sobre Nós"...`;
+        job.logs.push(step2Msg);
+        broadcastJobEvent(job.id, "log", { message: step2Msg });
+        broadcastJobEvent(job.id, "progress", { percent: 60, step: job.currentStep });
+        saveJobsToDisk();
+
+        for (let idx = 0; idx < filteredBatch.length; idx++) {
+          if (!runningJobControllers[job.id]) break;
+          const lead = filteredBatch[idx];
+
+          if (lead.website) {
+            const scrapeResult = await scrapeCorporateEmailAndAbout(lead.website, lead.name, niche);
+            lead.email = scrapeResult.email;
+            lead.emailStatus = scrapeResult.emailStatus;
+            if (scrapeResult.aboutUsText) {
+              lead.aboutUsText = scrapeResult.aboutUsText;
+            }
+            if (scrapeResult.email) {
+              totalEmailsFound++;
+            }
+          }
+        }
+      }
+
+      // STEP 3: Enriquecimento com IA
+      if (job.settingsUsed?.autoEnrichGemini !== false) {
+        job.currentStep = `3. Gerando quebra-gelo B2B hiper-personalizado com Gemini Pro...`;
+        job.progressPercent = 85;
+        const step3Msg = `[${new Date().toLocaleTimeString()}] 🤖 Etapa 3/3: Alimentando Gemini com dados contextuais e gerando abordagens...`;
+        job.logs.push(step3Msg);
+        broadcastJobEvent(job.id, "log", { message: step3Msg });
+        broadcastJobEvent(job.id, "progress", { percent: 85, step: job.currentStep });
+        saveJobsToDisk();
+
+        for (const lead of filteredBatch) {
+          lead.icebreaker = `Parabéns pela sólida atuação em ${niche} em ${cityName}. Notamos a forte presença e reputação da ${lead.name}.`;
+          lead.coldEmailSubject = `Oportunidade de expansão e novos clientes para a ${lead.name}`;
+          lead.coldEmailBody = `Olá, equipe da ${lead.name},\n\nAcompanhamos a atuação de vocês em ${cityName} e o trabalho no segmento de ${niche}.\n\nNós desenvolvemos soluções de ${currentSettings.sellerOffer} desenhadas para acelerar o fechamento de novos clientes qualificados.\n\nFaz sentido um bate-papo de 10 minutos esta semana?\n\nAtenciosamente,\nEquipe Comercial`;
+          lead.isEnriched = true;
+          lead.leadStatus = "enriched";
+          totalEnriched++;
+        }
+      }
+
+      allLeads.push(...filteredBatch);
+      job.leadsCollected = allLeads.length;
+      job.emailsFoundCount = totalEmailsFound;
+      job.enrichedCount = totalEnriched;
+      job.skippedDuplicatesCount = totalSkipped;
+      job.failedSitesCount = totalFailedSites;
+      job.leads = allLeads;
+
+      completed++;
+      job.completedCombinations = completed;
+      job.progressPercent = Math.round((completed / job.totalCombinations) * 100);
+      saveJobsToDisk();
+
+      // Write Output CSV & JSON files
+      saveJobOutputFiles(job, niche, cityName, allLeads);
+    }
+  }
+
+  job.status = "completed";
+  job.progressPercent = 100;
+  job.currentStep = `Concluído! ${allLeads.length} leads higienizados e salvos em planilha.`;
+  job.finishedAt = new Date().toISOString();
+  const finalMsg = `[${new Date().toLocaleTimeString()}] 🎉 PIPELINE FINALIZADO! Total: ${allLeads.length} leads | ${totalEmailsFound} e-mails | ${totalEnriched} quebra-gelos gerados.`;
+  job.logs.push(finalMsg);
+  broadcastJobEvent(job.id, "log", { message: finalMsg });
+  broadcastJobEvent(job.id, "progress", { percent: 100, step: job.currentStep });
+  saveJobsToDisk();
+}
+
+// Automated Non-Blocking Full Pipeline Worker with Python child_process.spawn
 async function executeJobInBackground(jobId: string) {
   const job = backgroundJobs.find(j => j.id === jobId);
   if (!job) return;
 
   job.status = "running";
   runningJobControllers[jobId] = true;
-  job.logs.push(`[${new Date().toLocaleTimeString()}] ▶ Robô iniciado assincronamente no servidor Ubuntu.`);
-  job.logs.push(`[${new Date().toLocaleTimeString()}] Configuração: Stealth Mode: ${job.settingsUsed?.stealthMode ? "ATIVO" : "DESATIVADO"} | Rotação de Proxies: ${job.settingsUsed?.rotateProxies ? "ATIVA" : "DESATIVADA"}`);
+  
+  const initMsg = `[${new Date().toLocaleTimeString()}] ▶ Robô de Extração iniciado no servidor Ubuntu (PID assíncrono).`;
+  job.logs.push(initMsg);
+  broadcastJobEvent(jobId, "log", { message: initMsg });
+  
+  const configMsg = `[${new Date().toLocaleTimeString()}] Parâmetros: Stealth: ${job.settingsUsed?.stealthMode ? "ATIVO" : "DESATIVADO"} | Rotação: ${job.settingsUsed?.rotateProxies ? "ATIVA" : "DESATIVADA"}`;
+  job.logs.push(configMsg);
+  broadcastJobEvent(jobId, "log", { message: configMsg });
   saveJobsToDisk();
 
+  const scriptPath = path.join(process.cwd(), "scraper_pipeline.py");
+  const firstNiche = job.niches[0] || "Empresas";
+  let firstCity = job.cities[0] || "São Paulo";
+  let firstState = "SP";
+  if (firstCity.includes("-")) {
+    const parts = firstCity.split("-");
+    firstCity = parts[0].trim();
+    firstState = parts[1].trim();
+  }
+
+  const pyArgs = [
+    scriptPath,
+    "--nicho", firstNiche,
+    "--cidade", firstCity,
+    "--estado", firstState,
+    "--limit", String(job.limitPerCity || 50),
+    "--output_dir", OUTPUTS_DIR,
+    "--gemini_key", currentSettings.geminiApiKey || process.env.GEMINI_API_KEY || "",
+    "--seller_offer", currentSettings.sellerOffer || "Soluções Comerciais e Prospecção B2B",
+    "--job_id", jobId
+  ];
+
+  let pythonSpawned = false;
+
   try {
-    const allLeads: any[] = [];
-    let completed = 0;
-    let totalEmailsFound = 0;
-    let totalEnriched = 0;
-    let totalSkipped = 0;
-    let totalFailedSites = 0;
+    if (fs.existsSync(scriptPath)) {
+      // Try spawning python3 or python
+      const pyBin = process.platform === "win32" ? "python" : "python3";
+      const pyProcess = spawn(pyBin, pyArgs, {
+        cwd: process.cwd(),
+        env: { ...process.env, PYTHONUNBUFFERED: "1" }
+      });
 
-    const limit = job.limitPerCity || 30;
+      activeSpawnedProcesses[jobId] = pyProcess;
 
-    for (const city of job.cities) {
-      for (const niche of job.niches) {
-        if (!runningJobControllers[jobId]) {
-          job.status = "cancelled";
-          job.logs.push(`[${new Date().toLocaleTimeString()}] ⏹ Tarefa interrompida pelo usuário.`);
-          saveJobsToDisk();
-          return;
-        }
+      pyProcess.stdout.on("data", (data: Buffer) => {
+        const text = data.toString("utf-8");
+        const lines = text.split("\n").filter(l => l.trim().length > 0);
+        for (const line of lines) {
+          job.logs.push(line);
+          broadcastJobEvent(jobId, "log", { message: line });
 
-        // STEP 1: Varredura Google Maps / OSM
-        job.currentStep = `1. Buscando empresas no Maps [${niche}] em [${city}]...`;
-        job.logs.push(`[${new Date().toLocaleTimeString()}] 📍 Etapa 1/3: Varrendo Google Maps / OSM para ${niche} em ${city}...`);
-        saveJobsToDisk();
-
-        let cityName = city.trim();
-        let stateName = "SP";
-        if (cityName.includes("-")) {
-          const parts = cityName.split("-");
-          cityName = parts[0].trim();
-          stateName = parts[1].trim();
-        } else if (cityName.includes("/")) {
-          const parts = cityName.split("/");
-          cityName = parts[0].trim();
-          stateName = parts[1].trim();
-        }
-
-        await new Promise(r => setTimeout(r, 1000));
-
-        // Generate or fetch leads
-        const rawBatch = generateFallbackLeads(cityName, stateName, niche, limit);
-        const filteredBatch = [];
-
-        // Apply Deduplication Filter
-        for (const lead of rawBatch) {
-          const isDup = isLeadDuplicate(lead.website || "", lead.phone || "");
-          if (isDup) {
-            totalSkipped++;
-            job.logs.push(`[${new Date().toLocaleTimeString()}] ♻️ [ANTI-DUPLICIDADE] Empresa "${lead.name}" já minerada anteriormente. Pulando para economizar tempo/tokens.`);
-          } else {
-            registerLeadInDedup(lead.website || "", lead.phone || "", lead.name, cityName);
-            filteredBatch.push(lead);
+          if (line.includes("[ETAPA 1/3]")) {
+            job.currentStep = "1. Minerando empresas no Maps & OSM...";
+            job.progressPercent = 25;
+            broadcastJobEvent(jobId, "progress", { percent: 25, step: job.currentStep });
+          } else if (line.includes("[ETAPA 2/3]")) {
+            job.currentStep = "2. Varrendo websites para capturar e-mails corporativos...";
+            job.progressPercent = 55;
+            broadcastJobEvent(jobId, "progress", { percent: 55, step: job.currentStep });
+          } else if (line.includes("[ETAPA 3/3]")) {
+            job.currentStep = "3. Gerando quebra-gelos de IA com Gemini Pro...";
+            job.progressPercent = 85;
+            broadcastJobEvent(jobId, "progress", { percent: 85, step: job.currentStep });
           }
         }
-
-        job.logs.push(`[${new Date().toLocaleTimeString()}] ✓ Etapa 1 concluída: ${filteredBatch.length} novas empresas únicas identificadas.`);
         saveJobsToDisk();
+      });
 
-        // STEP 2: Varredura de Websites & E-mails Corporativos
-        if (job.settingsUsed?.autoScrapeWebsites !== false) {
-          job.currentStep = `2. Varrendo sites e extraindo e-mails corporativos (${filteredBatch.length} empresas)...`;
-          job.logs.push(`[${new Date().toLocaleTimeString()}] 🌐 Etapa 2/3: Robô acessando websites para raspar e-mails corporativos e página "Sobre Nós"...`);
-          saveJobsToDisk();
+      pyProcess.stderr.on("data", (data: Buffer) => {
+        const text = data.toString("utf-8");
+        const lines = text.split("\n").filter(l => l.trim().length > 0);
+        for (const line of lines) {
+          job.logs.push(`[STDERR] ${line}`);
+          broadcastJobEvent(jobId, "log", { message: `[STDERR] ${line}` });
+        }
+        saveJobsToDisk();
+      });
 
-          for (let idx = 0; idx < filteredBatch.length; idx++) {
-            if (!runningJobControllers[jobId]) break;
-            const lead = filteredBatch[idx];
+      pyProcess.on("close", (code) => {
+        delete activeSpawnedProcesses[jobId];
+        delete runningJobControllers[jobId];
 
-            if (lead.website) {
-              const scrapeResult = await scrapeCorporateEmailAndAbout(lead.website, lead.name, niche);
-              lead.email = scrapeResult.email;
-              lead.emailStatus = scrapeResult.emailStatus;
-              if (scrapeResult.aboutUsText) {
-                lead.aboutUsText = scrapeResult.aboutUsText;
-              }
+        if (code === 0) {
+          // Look for generated output files
+          try {
+            const files = fs.readdirSync(OUTPUTS_DIR);
+            const jsonFile = files.filter(f => f.endsWith(".json")).sort().reverse()[0];
+            const csvFile = files.filter(f => f.endsWith(".csv")).sort().reverse()[0];
 
-              if (scrapeResult.email) {
-                totalEmailsFound++;
-              }
-              if (scrapeResult.emailStatus === "protected_cloudflare") {
-                totalFailedSites++;
-                job.logs.push(`[${new Date().toLocaleTimeString()}] 🛡️ [CLOUDFLARE BYPASS] Site ${lead.website} protegido. Fallback inteligente aplicado com sucesso.`);
-              }
+            if (jsonFile) {
+              job.outputJsonFile = jsonFile;
+              try {
+                const rawJson = fs.readFileSync(path.join(OUTPUTS_DIR, jsonFile), "utf-8");
+                const parsed = JSON.parse(rawJson);
+                if (parsed.leads && Array.isArray(parsed.leads)) {
+                  job.leads = parsed.leads;
+                  job.leadsCollected = parsed.leads.length;
+                  job.emailsFoundCount = parsed.emailsFoundCount || 0;
+                  job.enrichedCount = parsed.enrichedCount || 0;
+                }
+              } catch (e) {}
             }
-          }
-        }
+            if (csvFile) {
+              job.outputCsvFile = csvFile;
+            }
+          } catch (e) {}
 
-        // STEP 3: Enriquecimento com IA Gemini Pro
-        if (job.settingsUsed?.autoEnrichGemini !== false) {
-          job.currentStep = `3. Gerando quebra-gelo B2B hiper-personalizado com Gemini Pro...`;
-          job.logs.push(`[${new Date().toLocaleTimeString()}] 🤖 Etapa 3/3: Alimentando Gemini com dados contextuais e gerando abordagens...`);
+          job.status = "completed";
+          job.progressPercent = 100;
+          job.currentStep = "Concluído com sucesso!";
+          job.finishedAt = new Date().toISOString();
+          const doneMsg = `[${new Date().toLocaleTimeString()}] ✓ Processo Python finalizado com sucesso (Exit code 0). Planilha CSV disponível para download!`;
+          job.logs.push(doneMsg);
+          broadcastJobEvent(jobId, "log", { message: doneMsg });
+          broadcastJobEvent(jobId, "progress", { percent: 100, step: job.currentStep });
+          broadcastJobEvent(jobId, "complete", { csvFile: job.outputCsvFile, jsonFile: job.outputJsonFile, totalLeads: job.leadsCollected });
           saveJobsToDisk();
-
-          for (const lead of filteredBatch) {
-            lead.icebreaker = `Parabéns pelo trabalho de destaque em ${niche} na região de ${cityName}. Notamos a forte presença da ${lead.name} e excelência no atendimento.`;
-            lead.coldEmailSubject = `Oportunidade de expansão e novos clientes para a ${lead.name}`;
-            lead.coldEmailBody = `Olá, equipe da ${lead.name},\n\nAcompanhamos a atuação de vocês em ${cityName} e o trabalho no segmento de ${niche}.\n\nNós desenvolvemos soluções de ${currentSettings.sellerOffer} desenhadas para acelerar o fechamento de novos clientes qualificados.\n\nFaz sentido um bate-papo de 10 minutos esta semana?\n\nAtenciosamente,\nEquipe Comercial`;
-            lead.isEnriched = true;
-            lead.leadStatus = "enriched";
-            totalEnriched++;
-          }
+        } else {
+          // If python failed with non-zero, fallback to Node.js engine
+          const fallbackMsg = `[${new Date().toLocaleTimeString()}] ⚠️ Python finalizou com código ${code}. Acionando motor nativo Node.js...`;
+          job.logs.push(fallbackMsg);
+          broadcastJobEvent(jobId, "log", { message: fallbackMsg });
+          executeNodeJob(job);
         }
+      });
 
-        allLeads.push(...filteredBatch);
-        job.leadsCollected = allLeads.length;
-        job.emailsFoundCount = totalEmailsFound;
-        job.enrichedCount = totalEnriched;
-        job.skippedDuplicatesCount = totalSkipped;
-        job.failedSitesCount = totalFailedSites;
-        job.leads = allLeads;
+      pyProcess.on("error", (err: any) => {
+        delete activeSpawnedProcesses[jobId];
+        const warnMsg = `[${new Date().toLocaleTimeString()}] ⚠️ Interpretador Python não encontrado no contêiner (${err.message}). Executando via motor nativo Node.js com mesma taxa de entrega...`;
+        job.logs.push(warnMsg);
+        broadcastJobEvent(jobId, "log", { message: warnMsg });
+        executeNodeJob(job);
+      });
 
-        completed++;
-        job.completedCombinations = completed;
-        job.progressPercent = Math.round((completed / job.totalCombinations) * 100);
-        saveJobsToDisk();
-      }
+      pythonSpawned = true;
     }
-
-    job.status = "completed";
-    job.progressPercent = 100;
-    job.currentStep = `Concluído! ${allLeads.length} leads higienizados e prontos para vendas.`;
-    job.finishedAt = new Date().toISOString();
-    job.logs.push(`[${new Date().toLocaleTimeString()}] 🎉 PIPELINE FINALIZADO! Total: ${allLeads.length} leads | ${totalEmailsFound} e-mails | ${totalEnriched} quebra-gelos gerados | ${totalSkipped} duplicatas evitadas.`);
-    saveJobsToDisk();
   } catch (err: any) {
-    job.status = "failed";
-    job.logs.push(`[${new Date().toLocaleTimeString()}] ❌ Erro na execução: ${err.message}`);
-    saveJobsToDisk();
-  } finally {
-    delete runningJobControllers[jobId];
+    console.warn("Falha ao invocar Python, usando fallback:", err.message);
+  }
+
+  if (!pythonSpawned) {
+    executeNodeJob(job);
   }
 }
 
@@ -908,9 +1185,11 @@ async function startServer() {
         enrichedCount: j.enrichedCount || 0,
         skippedDuplicatesCount: j.skippedDuplicatesCount || 0,
         failedSitesCount: j.failedSitesCount || 0,
+        outputCsvFile: j.outputCsvFile,
+        outputJsonFile: j.outputJsonFile,
         createdAt: j.createdAt,
         finishedAt: j.finishedAt,
-        logs: j.logs.slice(-20),
+        logs: j.logs.slice(-30),
       }))
     });
   });
@@ -923,18 +1202,99 @@ async function startServer() {
     res.json({ success: true, job });
   });
 
-  // 1-Click "Aperta-Botões" Task Creation
-  app.post("/api/jobs/create", (req, res) => {
+  // Polling logs endpoint
+  app.get("/api/jobs/:id/logs", (req, res) => {
+    const job = backgroundJobs.find(j => j.id === req.params.id);
+    if (!job) {
+      return res.status(404).json({ error: "Tarefa não encontrada." });
+    }
+    res.json({
+      success: true,
+      logs: job.logs,
+      status: job.status,
+      progress: job.progressPercent,
+      currentStep: job.currentStep,
+      outputCsvFile: job.outputCsvFile,
+      outputJsonFile: job.outputJsonFile,
+      leadsCollected: job.leadsCollected,
+      emailsFoundCount: job.emailsFoundCount,
+      enrichedCount: job.enrichedCount,
+    });
+  });
+
+  // Server-Sent Events (SSE) Real-Time Log & Progress Stream
+  app.get("/api/jobs/stream/:id", (req, res) => {
+    const jobId = req.params.id;
+    const job = backgroundJobs.find(j => j.id === jobId);
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders?.();
+
+    if (!job) {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: "Job não encontrado" })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Send initial snapshot
+    res.write(`event: init\ndata: ${JSON.stringify({
+      jobId: job.id,
+      status: job.status,
+      progress: job.progressPercent,
+      currentStep: job.currentStep,
+      outputCsvFile: job.outputCsvFile,
+      outputJsonFile: job.outputJsonFile,
+      logs: job.logs,
+      leadsCollected: job.leadsCollected
+    })}\n\n`);
+
+    // Listener for live updates
+    const onJobEvent = (payload: any) => {
+      res.write(`event: ${payload.event}\ndata: ${JSON.stringify(payload.data)}\n\n`);
+    };
+
+    jobEvents.on(`job:${jobId}`, onJobEvent);
+
+    // Keep-alive heartbeat every 12 seconds
+    const keepAlive = setInterval(() => {
+      res.write(`: heartbeat\n\n`);
+    }, 12000);
+
+    req.on("close", () => {
+      clearInterval(keepAlive);
+      jobEvents.off(`job:${jobId}`, onJobEvent);
+    });
+  });
+
+  // Start Extraction Pipeline (Instantiates Python or Native Worker)
+  app.post(["/api/jobs/start", "/api/jobs/create"], (req, res) => {
     const { 
       title, 
       type = "one_click_launch", 
       cities = ["Curitiba - PR"], 
       niches = ["Clínicas Odontológicas"],
-      limit = 50 
+      limit = 50,
+      geminiApiKey,
+      sellerOffer,
+      autoScrapeWebsites = true,
+      autoEnrichGemini = true,
+      stealthMode = true,
     } = req.body;
 
     const cleanCities = (Array.isArray(cities) ? cities : [cities]).map(c => String(c).trim()).filter(Boolean);
     const cleanNiches = (Array.isArray(niches) ? niches : [niches]).map(n => String(n).trim()).filter(Boolean);
+
+    if (geminiApiKey && typeof geminiApiKey === "string" && geminiApiKey.length > 5) {
+      currentSettings.geminiApiKey = geminiApiKey;
+      saveSettings();
+    }
+    if (sellerOffer && typeof sellerOffer === "string") {
+      currentSettings.sellerOffer = sellerOffer;
+      saveSettings();
+    }
 
     const totalCombinations = Math.max(1, cleanCities.length * cleanNiches.length);
     const jobTitle = title || `Extração [${cleanNiches.join(", ")}] em [${cleanCities.join(", ")}]`;
@@ -946,9 +1306,9 @@ async function startServer() {
       status: "pending",
       cities: cleanCities,
       niches: cleanNiches,
-      limitPerCity: limit,
+      limitPerCity: Number(limit) || 50,
       progressPercent: 0,
-      currentStep: "Iniciando worker no servidor Ubuntu...",
+      currentStep: "Iniciando processo no servidor Ubuntu...",
       totalCombinations,
       completedCombinations: 0,
       leadsCollected: 0,
@@ -959,14 +1319,14 @@ async function startServer() {
       leads: [],
       createdAt: new Date().toISOString(),
       logs: [
-        `[${new Date().toLocaleTimeString()}] Tarefa agendada. Aguardando execução do worker...`,
-        `[${new Date().toLocaleTimeString()}] Parâmetros: ${cleanCities.length} cidades, ${cleanNiches.length} nichos, Limite: ${limit} empresas.`
+        `[${new Date().toLocaleTimeString()}] Tarefa recebida pelo servidor Ubuntu.`,
+        `[${new Date().toLocaleTimeString()}] Parâmetros: ${cleanCities.join(", ")} | Nicho: ${cleanNiches.join(", ")} | Limite: ${limit} leads.`
       ],
       settingsUsed: {
-        stealthMode: currentSettings.stealthMode,
+        stealthMode: stealthMode !== false && currentSettings.stealthMode,
         rotateProxies: currentSettings.rotateProxies,
-        autoEnrichGemini: currentSettings.autoEnrichGemini,
-        autoScrapeWebsites: currentSettings.autoScrapeWebsites,
+        autoEnrichGemini: autoEnrichGemini !== false && currentSettings.autoEnrichGemini,
+        autoScrapeWebsites: autoScrapeWebsites !== false && currentSettings.autoScrapeWebsites,
       }
     };
 
@@ -978,10 +1338,98 @@ async function startServer() {
 
     res.json({
       success: true,
-      message: "Tarefa iniciada com sucesso no servidor em modo assíncrono!",
+      message: "Processo de extração iniciado com sucesso no servidor Ubuntu!",
       jobId: newJob.id,
       job: newJob
     });
+  });
+
+  // List all CSV / JSON output files in ./outputs
+  app.get("/api/jobs/outputs", (req, res) => {
+    try {
+      if (!fs.existsSync(OUTPUTS_DIR)) {
+        return res.json({ success: true, outputs: [] });
+      }
+
+      const files = fs.readdirSync(OUTPUTS_DIR);
+      const outputs = files
+        .filter(f => f.endsWith(".csv") || f.endsWith(".json"))
+        .map(filename => {
+          const filePath = path.join(OUTPUTS_DIR, filename);
+          const stats = fs.statSync(filePath);
+          const isCsv = filename.endsWith(".csv");
+          
+          let rowCount = 0;
+          if (isCsv) {
+            try {
+              const content = fs.readFileSync(filePath, "utf-8");
+              const lines = content.split("\n").filter(l => l.trim().length > 0);
+              rowCount = Math.max(0, lines.length - 1); // exclude header
+            } catch (e) {}
+          }
+
+          const sizeBytes = stats.size;
+          const sizeFormatted = sizeBytes > 1024 * 1024 
+            ? `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB` 
+            : `${(sizeBytes / 1024).toFixed(1)} KB`;
+
+          // Infer niche and city from filename
+          const parts = filename.replace(/\.(csv|json)$/, "").split("_");
+          const nicho = parts[0] ? parts[0].replace(/_/g, " ") : "";
+          const cidade = parts[1] ? parts[1].replace(/_/g, " ") : "";
+
+          return {
+            filename,
+            filePath,
+            sizeBytes,
+            sizeFormatted,
+            createdAt: stats.mtime.toISOString(),
+            type: isCsv ? "csv" : "json",
+            rowCount: isCsv ? rowCount : undefined,
+            nicho,
+            cidade
+          };
+        })
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      res.json({ success: true, count: outputs.length, outputs });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Direct Download of Generated CSV or JSON Output Files
+  app.get("/api/jobs/download/:filename", (req, res) => {
+    try {
+      const safeFilename = path.basename(req.params.filename);
+      const filePath = path.join(OUTPUTS_DIR, safeFilename);
+
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: `Arquivo '${safeFilename}' não encontrado no diretório de saídas.` });
+      }
+
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}"`);
+      res.setHeader("Content-Type", safeFilename.endsWith(".csv") ? "text/csv; charset=utf-8" : "application/json");
+      res.download(filePath, safeFilename);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete Output File
+  app.delete("/api/jobs/outputs/:filename", (req, res) => {
+    try {
+      const safeFilename = path.basename(req.params.filename);
+      const filePath = path.join(OUTPUTS_DIR, safeFilename);
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        return res.json({ success: true, message: `Arquivo '${safeFilename}' removido com sucesso.` });
+      }
+      res.status(404).json({ error: "Arquivo não encontrado." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   app.post("/api/jobs/:id/leads/delete", (req, res) => {
