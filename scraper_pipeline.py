@@ -232,12 +232,14 @@ def clean_domain(url):
 # 2. AI Search Planner com Gemini
 # ----------------------------------------------------------------------
 
-def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key):
+def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini_model="gemini-3.1-flash-lite"):
     """
     Gera o Plano Estratégico de Extração via Gemini com variações semânticas
     do nicho e mapeamento de bairros e municípios metropolitanos reais.
+    Possui fallback automático resiliente entre múltiplos modelos Gemini.
     """
-    log(f"🧠 [AI SEARCH PLANNER] Consultando Gemini para planejar varredura semântica e territorial...", "AI")
+    primary_model = gemini_model or "gemini-3.1-flash-lite"
+    log(f"🧠 [AI SEARCH PLANNER] Consultando Gemini ({primary_model}) para planejar varredura semântica e territorial...", "AI")
     
     city_key = cidade.lower().strip()
     city_info = CITY_GEO_DATA.get(city_key, None)
@@ -259,7 +261,21 @@ def plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key):
     ]
 
     if gemini_api_key and len(gemini_api_key) > 10:
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+        models_to_try = [
+            primary_model,
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-latest"
+        ]
+        # Remove duplicatas mantendo a ordem
+        unique_models = []
+        for m in models_to_try:
+            if m and m not in unique_models:
+                unique_models.append(m)
+
         prompt = f"""
 Você é um Especialista Sênior em Inteligência Geográfica e Prospecção Comercial B2B no Brasil.
 Crie um Plano Estratégico de Busca no Google Maps para o seguinte objetivo:
@@ -281,7 +297,7 @@ Retorne APENAS um JSON válido no seguinte formato estrito:
     "Bairro Real 1",
     "Bairro Real 2",
     "Bairro Real 3",
-    ... (liste entre 20 a 30 bairros comerciais reais e, se macro_metro, cidades vizinhas da grande {cidade})
+    "Bairro Real 4"
   ]
 }}
 """
@@ -293,33 +309,36 @@ Retorne APENAS um JSON válido no seguinte formato estrito:
             }
         }
 
-        try:
-            req = urllib.request.Request(
-                endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=9.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(text)
-                
-                terms = parsed.get("semanticTerms", [])
-                subregions = parsed.get("subregions", [])
+        for model_cand in unique_models:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_cand}:generateContent?key={gemini_api_key}"
+            try:
+                req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=9.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = json.loads(text)
+                    
+                    terms = parsed.get("semanticTerms", [])
+                    subregions = parsed.get("subregions", [])
 
-                if terms and subregions:
-                    log(f"✓ Plano IA gerado: {len(terms)} variações semânticas e {len(subregions)} sub-regiões reais em {cidade} - {uf}.", "SUCCESS")
-                    log(f"   Variações: {', '.join(terms[:4])}", "AI")
-                    log(f"   Áreas em foco: {', '.join(subregions[:6])}... (+{len(subregions)-6} regiões)", "AI")
-                    return {
-                        "semanticTerms": terms[:5],
-                        "subregions": subregions[:30]
-                    }
-        except Exception as e:
-            log(f"Gemini AI Planner fallback ({e}). Usando matriz geográfica local...", "WARN")
+                    if terms and subregions:
+                        log(f"✓ Plano IA gerado com sucesso via [{model_cand}]: {len(terms)} termos semânticos e {len(subregions)} sub-regiões em {cidade} - {uf}.", "SUCCESS")
+                        log(f"   Variações: {', '.join(terms[:4])}", "AI")
+                        log(f"   Áreas em foco: {', '.join(subregions[:6])}... (+{len(subregions)-6} regiões)", "AI")
+                        return {
+                            "semanticTerms": terms[:5],
+                            "subregions": subregions[:30]
+                        }
+            except Exception as e:
+                log(f"Modelo [{model_cand}] indisponível ({e}). Tentando próximo modelo...", "WARN")
+                continue
 
-    # Retorno com fallback local
-    log(f"✓ Plano Estratégico: {len(fallback_terms)} termos semânticos e {len(fallback_bairros)} sub-regiões em {cidade} - {uf}.", "SUCCESS")
+    # Retorno com fallback local caso nenhum modelo responda
+    log(f"✓ Matriz Territorial Estratégica: {len(fallback_terms)} termos semânticos e {len(fallback_bairros)} sub-regiões em {cidade} - {uf}.", "SUCCESS")
     return {
         "semanticTerms": fallback_terms,
         "subregions": fallback_bairros
@@ -330,7 +349,7 @@ Retorne APENAS um JSON válido no seguinte formato estrito:
 # 3. Extração Real Google Maps com Playwright e Deep Scroll Loop
 # ----------------------------------------------------------------------
 
-async def scrape_google_maps_playwright(nicho, cidade, uf, limit, scope="city_center", gemini_api_key=""):
+async def scrape_google_maps_playwright(nicho, cidade, uf, limit, scope="city_center", gemini_api_key="", gemini_model="gemini-3.1-flash-lite"):
     """
     Executa raspagem real com Playwright no Google Maps iterando sobre o plano
     semântico e territorial gerado pelo AI Search Planner, com rolagem profunda (Deep Scroll).
@@ -339,7 +358,7 @@ async def scrape_google_maps_playwright(nicho, cidade, uf, limit, scope="city_ce
         return None
 
     # Obtém o plano de busca com IA
-    search_plan = plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key)
+    search_plan = plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini_model)
     semantic_terms = search_plan["semanticTerms"]
     subregions = search_plan["subregions"]
 
@@ -508,12 +527,12 @@ async def scrape_google_maps_playwright(nicho, cidade, uf, limit, scope="city_ce
 # 4. Fallback Web Engine com Busca Semântica Territorial
 # ----------------------------------------------------------------------
 
-def generate_strategic_geogrid_leads(nicho, cidade, uf, limit, scope="city_center", gemini_api_key=""):
+def generate_strategic_geogrid_leads(nicho, cidade, uf, limit, scope="city_center", gemini_api_key="", gemini_model="gemini-3.1-flash-lite"):
     """
     Motor determinístico de alta fidelidade que segue rigorosamente o
     Plano Estratégico IA com deduplicação para garantir a meta de leads solicitada.
     """
-    search_plan = plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key)
+    search_plan = plan_search_strategy_gemini(nicho, cidade, uf, scope, gemini_api_key, gemini_model)
     semantic_terms = search_plan["semanticTerms"]
     subregions = search_plan["subregions"]
 
@@ -705,7 +724,7 @@ def scrape_website_metadata(website_url):
 # 6. Enriquecimento B2B com Gemini
 # ----------------------------------------------------------------------
 
-def generate_gemini_icebreaker(lead, seller_offer, gemini_api_key):
+def generate_gemini_icebreaker(lead, seller_offer, gemini_api_key, gemini_model="gemini-3.1-flash-lite"):
     company_name = lead.get("name", "Empresa")
     nicho = lead.get("category", "Serviços")
     cidade = lead.get("city", "sua cidade")
@@ -714,7 +733,20 @@ def generate_gemini_icebreaker(lead, seller_offer, gemini_api_key):
     about = lead.get("aboutUs", "")
 
     if gemini_api_key and len(gemini_api_key) > 10:
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_api_key}"
+        models_to_try = [
+            gemini_model or "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-flash-lite-latest",
+            "gemini-3.5-flash-lite",
+            "gemini-flash-latest"
+        ]
+        unique_models = []
+        for m in models_to_try:
+            if m and m not in unique_models:
+                unique_models.append(m)
+
         prompt = f"""
 Você é um Diretor de Vendas B2B de alta performance.
 Crie um Quebra-Gelo de 1 frase única e um Gancho de Cold Email para prospectar esta empresa:
@@ -737,23 +769,25 @@ Responda APENAS em formato JSON válido:
             "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"}
         }
 
-        try:
-            req = urllib.request.Request(
-                endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(text)
-                return {
-                    "icebreaker": parsed.get("icebreaker", ""),
-                    "coldEmailSubject": parsed.get("coldEmailSubject", ""),
-                    "coldEmailBody": parsed.get("coldEmailBody", "")
-                }
-        except Exception:
-            pass
+        for model_cand in unique_models:
+            endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_cand}:generateContent?key={gemini_api_key}"
+            try:
+                req = urllib.request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(req, timeout=8.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    parsed = json.loads(text)
+                    return {
+                        "icebreaker": parsed.get("icebreaker", ""),
+                        "coldEmailSubject": parsed.get("coldEmailSubject", ""),
+                        "coldEmailBody": parsed.get("coldEmailBody", "")
+                    }
+            except Exception:
+                continue
 
     # Fallback inteligente contextual
     icebreaker = f"Acompanhei a sólida reputação da {company_name} no Google ({rating}★) e a atuação de destaque em {bairro or cidade}."
@@ -893,10 +927,10 @@ def export_leads_to_csv(leads, file_path):
 # 8. Pipeline Principal
 # ----------------------------------------------------------------------
 
-async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, gemini_key, seller_offer, job_id):
+async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, gemini_key, seller_offer, job_id, gemini_model="gemini-3.1-flash-lite"):
     cidade, uf = normalize_city_and_state(cidade_raw, estado_raw)
     
-    log(f"🚀 Iniciando Pipeline B2B Inteligente para '{nicho}' em '{cidade}, {uf}' (Meta: {limit} leads | Escopo: {scope})...", "STEP")
+    log(f"🚀 Iniciando Pipeline B2B Inteligente para '{nicho}' em '{cidade}, {uf}' (Meta: {limit} leads | Escopo: {scope} | Modelo IA: {gemini_model})...", "STEP")
     os.makedirs(output_dir, exist_ok=True)
 
     # 1. RASPAGEM GOOGLE MAPS COM AI SEARCH PLANNER
@@ -904,11 +938,11 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
     
     leads = None
     if HAS_PLAYWRIGHT:
-        leads = await scrape_google_maps_playwright(nicho, cidade, uf, limit, scope, gemini_key)
+        leads = await scrape_google_maps_playwright(nicho, cidade, uf, limit, scope, gemini_key, gemini_model)
 
     if not leads or len(leads) == 0:
         log("Executando Motor Territorial com Plano Estratégico IA...", "GRID")
-        leads = generate_strategic_geogrid_leads(nicho, cidade, uf, limit, scope, gemini_key)
+        leads = generate_strategic_geogrid_leads(nicho, cidade, uf, limit, scope, gemini_key, gemini_model)
 
     log(f"✓ Etapa 1 finalizada: {len(leads)} empresas únicas identificadas.", "SUCCESS")
 
@@ -930,10 +964,10 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
     log(f"✓ Etapa 2 finalizada: {emails_found_count} e-mails corporativos minerados.", "SUCCESS")
 
     # 3. ENRIQUECIMENTO GEMINI
-    log(f"[ETAPA 3/3] Gerando quebra-gelos hiper-personalizados com Gemini...", "AI")
+    log(f"[ETAPA 3/3] Gerando quebra-gelos hiper-personalizados com Gemini ({gemini_model})...", "AI")
     enriched_count = 0
     for idx, lead in enumerate(leads):
-        ai_data = generate_gemini_icebreaker(lead, seller_offer, gemini_key)
+        ai_data = generate_gemini_icebreaker(lead, seller_offer, gemini_key, gemini_model)
         lead["icebreaker"] = ai_data["icebreaker"]
         lead["coldEmailSubject"] = ai_data["coldEmailSubject"]
         lead["coldEmailBody"] = ai_data["coldEmailBody"]
@@ -962,6 +996,7 @@ async def run_pipeline(nicho, cidade_raw, estado_raw, limit, scope, output_dir, 
             "estado": uf,
             "limit": limit,
             "scope": scope,
+            "geminiModel": gemini_model,
             "totalLeads": len(leads),
             "emailsFoundCount": emails_found_count,
             "enrichedCount": enriched_count,
@@ -981,6 +1016,7 @@ def main():
     parser.add_argument("--scope", default="city_center", choices=["city_center", "macro_metro"])
     parser.add_argument("--output_dir", default="./outputs", help="Diretório de saída")
     parser.add_argument("--gemini_key", default="", help="Chave API Gemini")
+    parser.add_argument("--gemini_model", default="gemini-3.1-flash-lite", help="Modelo Gemini a ser utilizado")
     parser.add_argument("--seller_offer", default="Prospecção e Vendas B2B", help="Oferta do vendedor")
     parser.add_argument("--job_id", default="job-manual", help="ID da tarefa")
 
@@ -994,6 +1030,7 @@ def main():
         scope=args.scope,
         output_dir=args.output_dir,
         gemini_key=args.gemini_key,
+        gemini_model=args.gemini_model,
         seller_offer=args.seller_offer,
         job_id=args.job_id
     ))

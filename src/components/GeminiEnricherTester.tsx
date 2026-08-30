@@ -109,7 +109,7 @@ export const GeminiEnricherTester: React.FC<GeminiEnricherTesterProps> = ({ pref
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-[#00FF9C]" />
             <h2 className="text-base font-bold text-[#E4E7EB] uppercase tracking-wide">
-              Motor de Enriquecimento & Quebra-Gelo (Gemini 3.7 Flash)
+              Motor de Enriquecimento & Quebra-Gelo B2B (Gemini AI Engine)
             </h2>
           </div>
           <p className="text-xs text-[#A0A6B1] font-sans">

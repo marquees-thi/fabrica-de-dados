@@ -15,14 +15,15 @@ import {
   Trash2,
   ExternalLink,
   Eye,
-  EyeOff
+  EyeOff,
+  Cpu
 } from "lucide-react";
 import { SystemSettings } from "../types";
 
 export const SettingsEvasionPanel: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings>({
     geminiApiKey: "",
-    geminiModel: "gemini-3.7-flash",
+    geminiModel: "gemini-3.1-flash-lite",
     proxies: "185.199.229.15:8080:user_b2b:pass_stealth\n198.51.100.22:3128:user_b2b:pass_stealth\n203.0.113.45:8000:user_b2b:pass_stealth",
     rotateProxies: true,
     stealthMode: true,
@@ -42,6 +43,11 @@ export const SettingsEvasionPanel: React.FC = () => {
   const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // IA Model Testing State
+  const [testingModel, setTestingModel] = useState(false);
+  const [modelTestResult, setModelTestResult] = useState<{ success: boolean; message: string; latency?: number } | null>(null);
+  const [customModelMode, setCustomModelMode] = useState(false);
+
   const fetchSettings = async () => {
     try {
       setLoading(true);
@@ -60,6 +66,43 @@ export const SettingsEvasionPanel: React.FC = () => {
   useEffect(() => {
     fetchSettings();
   }, []);
+
+  const handleTestModel = async (modelToTest?: string) => {
+    const targetModel = modelToTest || settings.geminiModel || "gemini-3.1-flash-lite";
+    setTestingModel(true);
+    setModelTestResult(null);
+
+    try {
+      const res = await fetch("/api/gemini/test-model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelName: targetModel,
+          customApiKey: settings.geminiApiKey
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setModelTestResult({
+          success: true,
+          message: `✓ Conexão bem-sucedida! Latência: ${data.latencyMs}ms. O modelo ${targetModel} está operacional e respondendo perfeitamente.`,
+          latency: data.latencyMs
+        });
+      } else {
+        setModelTestResult({
+          success: false,
+          message: `❌ Falha ao conectar com ${targetModel}: ${data.error || "Erro na API"}`
+        });
+      }
+    } catch (err: any) {
+      setModelTestResult({
+        success: false,
+        message: `❌ Erro de conexão: ${err.message}`
+      });
+    } finally {
+      setTestingModel(false);
+    }
+  };
 
   const handleSaveSettings = async () => {
     try {
@@ -198,19 +241,98 @@ export const SettingsEvasionPanel: React.FC = () => {
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-mono text-[#A0A6B1] mb-1">
-                Modelo de IA Recomendado:
-              </label>
-              <select
-                value={settings.geminiModel}
-                onChange={(e) => setSettings({ ...settings, geminiModel: e.target.value })}
-                className="w-full bg-[#0A0B0E] border border-[#22262E] px-3 py-2 text-xs font-mono text-[#E4E7EB] focus:border-[#00FF9C] focus:outline-none"
-              >
-                <option value="gemini-3.7-flash">Gemini 3.7 Flash (Mais Rápido & Inteligente - Recomendado)</option>
-                <option value="gemini-flash-latest">Gemini Flash Latest (Alta Velocidade)</option>
-                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (Ultra Econômico)</option>
-              </select>
+            {/* Seleção de Modelo com Opções e Testador */}
+            <div className="p-3 bg-[#0A0B0E] border border-[#22262E] space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold font-mono text-[#E4E7EB] flex items-center gap-1.5">
+                  <Cpu className="w-3.5 h-3.5 text-[#00FF9C]" />
+                  <span>Modelo de IA Selecionado:</span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setCustomModelMode(!customModelMode)}
+                  className="text-[10px] font-mono text-[#717681] hover:text-[#00FF9C] underline"
+                >
+                  {customModelMode ? "← Escolher da Lista" : "Digitar Manualmente"}
+                </button>
+              </div>
+
+              {!customModelMode ? (
+                <select
+                  value={settings.geminiModel}
+                  onChange={(e) => {
+                    setSettings({ ...settings, geminiModel: e.target.value });
+                    setModelTestResult(null);
+                  }}
+                  className="w-full bg-[#14161B] border border-[#22262E] px-3 py-2 text-xs font-mono text-[#00FF9C] font-bold focus:border-[#00FF9C] focus:outline-none"
+                >
+                  <optgroup label="⚡ Modelos Flash Rápidos (Recomendados - Estáveis & Sem Erros)">
+                    <option value="gemini-3.1-flash-lite">
+                      🟢 Gemini 3.1 Flash Lite (Ultra Rápido ~300ms, Econômico) ★ Recomendado
+                    </option>
+                    <option value="gemini-3.5-flash">
+                      🟢 Gemini 3.5 Flash (Balanceado & Alta Precisão Semântica) ★ Recomendado
+                    </option>
+                    <option value="gemini-3.6-flash">
+                      🟢 Gemini 3.6 Flash (Nova Geração Multimodal)
+                    </option>
+                    <option value="gemini-flash-lite-latest">
+                      🟢 Gemini Flash Lite Latest (Sempre Atualizado)
+                    </option>
+                    <option value="gemini-3.5-flash-lite">
+                      🟢 Gemini 3.5 Flash Lite (Intermediário Compacto)
+                    </option>
+                    <option value="gemini-flash-latest">
+                      🟢 Gemini Flash Latest (Alias Padrão de Produção)
+                    </option>
+                  </optgroup>
+                  <optgroup label="🧠 Modelos Pro & Open Weights">
+                    <option value="gemini-3.1-pro-preview">
+                      🟡 Gemini 3.1 Pro Preview (Máximo Raciocínio B2B)
+                    </option>
+                    <option value="gemma-4-31b-it">
+                      🟢 Gemma 4 31B Instruct (Modelo Aberto Google DeepMind)
+                    </option>
+                  </optgroup>
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={settings.geminiModel}
+                  onChange={(e) => setSettings({ ...settings, geminiModel: e.target.value })}
+                  placeholder="Ex: gemini-3.1-flash-lite, gemini-3.5-flash..."
+                  className="w-full bg-[#14161B] border border-[#22262E] px-3 py-2 text-xs font-mono text-[#00FF9C] font-bold focus:border-[#00FF9C] focus:outline-none"
+                />
+              )}
+
+              {/* Botão de Teste de Conectividade do Modelo */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+                <div className="text-[11px] font-mono text-[#A0A6B1]">
+                  Modelo ativo: <span className="text-[#00FF9C] font-bold">{settings.geminiModel || "gemini-3.1-flash-lite"}</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleTestModel()}
+                  disabled={testingModel}
+                  className="px-3 py-1.5 bg-[#1C1F26] border border-[#22262E] hover:border-[#00FF9C]/60 text-xs font-mono text-[#00FF9C] transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${testingModel ? "animate-spin text-amber-400" : ""}`} />
+                  <span>{testingModel ? "Testando Modelo..." : "⚡ Testar Conexão do Modelo"}</span>
+                </button>
+              </div>
+
+              {/* Resultado do Teste de Modelo */}
+              {modelTestResult && (
+                <div className={`p-2.5 border text-xs font-mono ${
+                  modelTestResult.success 
+                    ? "bg-[#00FF9C]/10 border-[#00FF9C]/40 text-[#00FF9C]" 
+                    : "bg-rose-500/10 border-rose-500/40 text-rose-400"
+                }`}>
+                  {modelTestResult.message}
+                </div>
+              )}
             </div>
 
             <div>
